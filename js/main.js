@@ -21,7 +21,7 @@ async function boot() {
   installTapGuard();
   installKeyboardLift();
   await store.loadStore();
-  document.documentElement.dataset.palette = store.getMeta('palette', 'dawn');
+  document.documentElement.dataset.palette = store.getMeta('palette', 'mist');
   settleOldDrafts();
 
   registerView('today', todayView);

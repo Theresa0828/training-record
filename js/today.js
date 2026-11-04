@@ -3,7 +3,7 @@ import * as store from './store.js';
 import { dateKey, findStudentByName, doneSessions, studentsNeedingPlan, newId, sessionSummary } from './core.js';
 import { currentStatus, isConnected, syncNow } from './sync.js';
 import { loadDemo } from './demo.js';
-import { icon, reformer } from './icons.js';
+import { icon, reformer, ring } from './icons.js';
 
 const KIND = { strength: '重訓', pilates: '皮拉提斯' };
 
@@ -43,11 +43,11 @@ function describe(event, today) {
 }
 
 /** The class to act on now: the one in progress, otherwise the first not yet finished. */
-function heroCard(item) {
+function heroCard(item, span) {
   const { event, student, last, content, inClass } = item;
   const needsProfile = !student.contraindications && !student.goal;
   const open = () => go('record', { studentId: student.id, kind: event.kind });
-  return h('section', { class: 'hero rise' },
+  return h('section', { class: `hero rise ${span}` },
     h('div', { class: 'hero-top' },
       h('span', { class: 'hero-label' }, inClass ? '正在上課' : '下一堂'),
       h('span', { class: 'hero-chip' }, kindLabel(event.kind))),
@@ -60,7 +60,7 @@ function heroCard(item) {
       student.nextNotes && h('div', { class: 'hero-note' }, icon('clock'), h('span', {}, student.nextNotes)),
       needsProfile && h('div', { class: 'hero-note' }, icon('warn'), h('span', {}, '還沒填目標和禁忌，可以先按「看總覽」補上。'))),
     h('div', { class: 'hero-actions' },
-      h('button', { type: 'button', class: 'btn big hero-go', onclick: open }, inClass ? '繼續上課' : '開始上課', icon('arrow')),
+      h('button', { type: 'button', class: 'btn big primary', onclick: open }, inClass ? '繼續上課' : '開始上課', icon('arrow')),
       button('看總覽', () => go('overview', { studentId: student.id }), 'ghost')));
 }
 
@@ -82,7 +82,7 @@ function slot(item) {
 }
 
 function welcome() {
-  return h('section', { class: 'welcome rise' },
+  return h('section', { class: 'welcome rise span-6' },
     reformer(),
     h('h2', {}, '先連上公司 Google 帳號'),
     h('p', {}, '連好後，今天預約的學生會自動列在這裡。還沒準備好的話，可以先用示範資料試按。'),
@@ -116,8 +116,8 @@ export function todayView() {
   const title = !items.length ? '今天' : left ? `今天還有 ${left} 堂` : '今天都上完了';
 
   return h('div', { class: 'screen has-tabs' },
-    h('main', { class: 'page stack-lg' },
-      h('header', { class: 'today-head' },
+    h('main', { class: 'page bento' },
+      h('header', { class: 'today-head span-6' },
         h('div', {},
           h('p', { class: 'today-date' }, formatDate(today)),
           h('h1', {}, title)),
@@ -125,19 +125,30 @@ export function todayView() {
           h('span', { class: `status${status.state === 'error' ? ' warn' : ''}`, 'data-sync-status': true }, status.message),
           h('button', { type: 'button', class: 'btn ghost', 'aria-label': '同步', onclick: () => syncNow() }, icon('sync')))),
       !connected && !demo && welcome(),
-      noCalendar && h('section', { class: 'welcome rise' },
+      noCalendar && h('section', { class: 'welcome rise span-6' },
         h('h2', {}, '最後一步：選擇日曆'),
         h('p', {}, '選好存放預約的公司日曆，今天的預約就會出現。'),
         button('選擇日曆', () => tab('settings'), 'big primary')),
-      hero && heroCard(hero),
-      !hero && items.length > 0 && h('section', { class: 'empty rise' }, reformer(), h('p', {}, need.length ? '辛苦了。接著可以排下次的課表。' : '辛苦了，今天的紀錄都存好了。')),
-      !items.length && !noCalendar && (connected || demo) && h('section', { class: 'empty rise' }, reformer(), h('p', {}, '今天沒有你的預約。')),
-      unreadable.length > 0 && h('p', { class: 'warn-text' },
+      hero && heroCard(hero, 'span-4'),
+      hero && h('div', { class: 'tiles span-2 rise' },
+        h('section', { class: 'tile' },
+          h('h2', { class: 'tile-title' }, '今天進度'),
+          ring(items.length ? Math.round(((items.length - left) / items.length) * 100) : 0),
+          h('p', { class: 'muted' }, `完成 ${items.length - left} / ${items.length} 堂`)),
+        need.length > 0
+          ? h('button', { type: 'button', class: 'tile tile-link', onclick: () => go('plan', { studentId: need[0].student.id }) },
+            h('span', { class: 'tile-title' }, '還沒排課表'),
+            h('span', { class: 'tile-number' }, need.length),
+            h('span', { class: 'muted' }, `先排 ${need[0].student.name}`))
+          : h('section', { class: 'tile' }, h('h2', { class: 'tile-title' }, '課表'), h('p', { class: 'muted' }, '接下來的課都排好了'))),
+      !hero && items.length > 0 && h('section', { class: 'empty rise span-6' }, reformer(), h('p', {}, need.length ? '辛苦了。接著可以排下次的課表。' : '辛苦了，今天的紀錄都存好了。')),
+      !items.length && !noCalendar && (connected || demo) && h('section', { class: 'empty rise span-6' }, reformer(), h('p', {}, '今天沒有你的預約。')),
+      unreadable.length > 0 && h('p', { class: 'warn-text span-6' },
         `有 ${unreadable.length} 筆預約的標題讀不到學生姓名：${unreadable.map((e) => e.title).join('、')}`),
-      others.length > 0 && h('section', { class: 'stack rise' },
+      others.length > 0 && h('section', { class: 'stack rise span-6' },
         h('h2', { class: 'section-title' }, '今天的其他課'),
         h('div', { class: 'timeline' }, others.map(slot))),
-      need.length > 0 && h('section', { class: 'stack rise' },
+      need.length > (hero ? 1 : 0) && h('section', { class: 'stack rise span-6' },
         h('h2', { class: 'section-title' }, `還沒排課表（${need.length}）`),
         h('div', { class: 'timeline' }, need.map(({ student, event }) => h('button', {
           type: 'button',

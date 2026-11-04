@@ -1,8 +1,11 @@
 // Plans the next class: starts from last time, then the teacher tweaks it.
-import { h, button, back, backButton, go, openSheet, toast } from './dom.js';
+import { h, button, back, backButton, go, openSheet, toast, dismissActionToast } from './dom.js';
 import * as store from './store.js';
-import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, sessionSummary } from './core.js';
-import { exercisePicker } from './library.js';
+import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, sessionSummary, swapRow, commonSprings } from './core.js';
+import { exercisePicker, rememberSwaps } from './library.js';
+import { springEditor } from './spring.js';
+import { numberSheet } from './numpad.js';
+import { icon } from './icons.js';
 import { kindLabel } from './today.js';
 
 function loadPlan(studentId, history) {
@@ -22,6 +25,7 @@ export function planView({ studentId }) {
   const undoStack = [];
   const undoButton = button('復原', () => {
     if (!undoStack.length) return;
+    dismissActionToast();
     plan.rows = JSON.parse(undoStack.pop());
     persist();
     draw();
@@ -30,6 +34,10 @@ export function planView({ studentId }) {
   function persist() {
     store.save('plans', plan);
     undoButton.disabled = undoStack.length === 0;
+  }
+
+  function undoOnce() {
+    undoButton.click();
   }
 
   function change(fn) {
@@ -48,6 +56,19 @@ export function planView({ studentId }) {
         if (field === 'weight') set.planWeight = value;
         if (field === 'reps') set.planReps = value;
       }
+    });
+  }
+
+  /** Types a value directly, for a jump too big for the plus and minus buttons. */
+  function typeValue(row, field, label, unit) {
+    numberSheet(`${row.name} ${label}`, row.sets[0]?.[field] ?? 0, unit, field === 'weight', (value) => {
+      change(() => {
+        for (const set of row.sets) {
+          set[field] = value;
+          if (field === 'weight') set.planWeight = value;
+          if (field === 'reps') set.planReps = value;
+        }
+      });
     });
   }
 
@@ -82,21 +103,33 @@ export function planView({ studentId }) {
   }
 
   function springControl(row) {
-    const input = h('input', {
-      class: 'input spring-input',
-      value: row.sets[0]?.spring || '',
-      placeholder: '例如 1r1b',
-      'aria-label': `${row.name} 彈簧`,
+    const open = () => openSheet(`${row.name} 的彈簧`, (close) => {
+      const area = h('div', { class: 'stack' });
+      const paint = () => area.replaceChildren(
+        springEditor(row.sets[0]?.spring || '', (text) => {
+          change(() => {
+            for (const set of row.sets) {
+              set.spring = text;
+              set.planSpring = text;
+            }
+          });
+          paint();
+        }, commonSprings(store.all('sessions'), 4)),
+        button('完成', close, 'big primary'));
+      paint();
+      return area;
     });
-    input.addEventListener('change', () => {
-      undoStack.push(JSON.stringify(plan.rows));
-      for (const set of row.sets) {
-        set.spring = input.value.trim();
-        set.planSpring = set.spring;
-      }
-      persist();
-    });
-    return h('div', { class: 'plan-control' }, h('span', { class: 'stepper-label' }, '彈簧'), input);
+    return h('div', { class: 'plan-control' }, h('span', { class: 'stepper-label' }, '彈簧'),
+      button(row.sets[0]?.spring || '選擇彈簧', open, 'plan-spring', { 'aria-label': `${row.name} 彈簧` }));
+  }
+
+  /** Two taps: this button, then the replacement. */
+  function swapExercise(row, index) {
+    openSheet(`把 ${row.name} 換成`, (close) => exercisePicker(row.kind, (exercise) => {
+      close();
+      change(() => swapRow(plan.rows, index, exercise, history));
+      toast(`已換成 ${exercise.name}`, { label: '復原', run: undoOnce });
+    }, { current: store.get('exercises', row.exerciseId) || { id: row.exerciseId, name: row.name, kind: row.kind } }), { wide: true });
   }
 
   function rowCard(row, index) {
@@ -107,8 +140,12 @@ export function planView({ studentId }) {
       h('div', { class: 'row-between' },
         h('strong', {}, `${index + 1}. ${row.name}`),
         h('div', { class: 'row-wrap' },
+          h('button', { type: 'button', class: 'btn swap-btn', onclick: () => swapExercise(row, index) }, icon('swap'), h('span', {}, '換動作')),
           button('上移', () => change(() => { plan.rows.splice(index - 1, 0, plan.rows.splice(index, 1)[0]); }), 'ghost', { disabled: index === 0 }),
-          button('移除', () => change(() => plan.rows.splice(index, 1)), 'ghost'))),
+          button('移除', () => {
+            change(() => plan.rows.splice(index, 1));
+            toast(`已移除 ${row.name}`, { label: '復原', run: undoOnce });
+          }, 'ghost'))),
       suggestion && !alreadyApplied && h('div', { class: 'suggestion' },
         h('span', {}, `連續兩次達標，建議 ${suggestion.from} → ${suggestion.to} kg`),
         button('採用', () => change(() => applySuggestion(row, suggestion)), 'primary'),
@@ -118,11 +155,11 @@ export function planView({ studentId }) {
           ? springControl(row)
           : h('div', { class: 'plan-control' }, h('span', { class: 'stepper-label' }, '重量'),
             step(row, 'weight', -2.5), step(row, 'weight', -1),
-            h('span', { class: 'stepper-value' }, first.weight || '自體'),
+            h('button', { type: 'button', class: 'stepper-value value-tap', 'aria-label': `${row.name} 直接輸入重量`, onclick: () => typeValue(row, 'weight', '重量', 'kg') }, first.weight || '自體'),
             step(row, 'weight', 1), step(row, 'weight', 2.5)),
         h('div', { class: 'plan-control' }, h('span', { class: 'stepper-label' }, '次數'),
           step(row, 'reps', -1),
-          h('span', { class: 'stepper-value' }, first.reps ?? '—'),
+          h('button', { type: 'button', class: 'stepper-value value-tap', 'aria-label': `${row.name} 直接輸入次數`, onclick: () => typeValue(row, 'reps', '次數', '') }, first.reps ?? '—'),
           step(row, 'reps', 1)),
         setsControl(row)));
   }
@@ -143,10 +180,11 @@ export function planView({ studentId }) {
         button('排好了', () => {
           if (!plan.rows.length) { toast('請先加入動作'); return; }
           persist();
+          rememberSwaps(plan.rows, plan.demo);
           toast('課表已儲存，下次上課會自動帶入');
           back();
         }, 'primary'))),
-    h('main', { class: 'page stack-lg' },
+    h('main', { class: 'page stack' },
       h('section', { class: 'callout stack-sm' },
         student.contraindications && h('p', { class: 'contra' }, `禁忌：${student.contraindications}`),
         student.nextNotes && h('p', {}, `注意：${student.nextNotes}`),

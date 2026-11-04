@@ -2,11 +2,13 @@
 import { h, button, backButton, go, home, openSheet, toast, dismissActionToast } from './dom.js';
 import * as store from './store.js';
 import {
-  MAX_SETS, DEFAULT_TAGS, DEFAULT_PROPS, chooserOptions, painList, painText, painShort, setPainMap, setText, rowDetails, exerciseHistory, exerciseTrend, ASSIST_LEVELS, SPRING_COLORS, SPRING_BARS, dateKey, newId, makeRow, makeSet,
-  doneSessions, startingRows, isBpFlagged, expectedDigits, springFromText, springToText, resolveStaleDraft,
+  MAX_SETS, DEFAULT_TAGS, DEFAULT_PROPS, chooserOptions, painList, painText, painShort, setPainMap, setText, rowDetails, exerciseHistory, exerciseTrend, ASSIST_LEVELS, dateKey, newId, makeRow, makeSet,
+  doneSessions, startingRows, isBpFlagged, expectedDigits, resolveStaleDraft, swapRow, commonSprings,
 } from './core.js';
 import { kindLabel } from './today.js';
-import { exercisePicker } from './library.js';
+import { exercisePicker, rememberSwaps } from './library.js';
+import { springEditor as springControls } from './spring.js';
+import { numberSheet } from './numpad.js';
 import { icon } from './icons.js';
 import { bodyMap } from './bodymap.js';
 import { trendChart } from './trend.js';
@@ -53,6 +55,7 @@ export function finishSession(session) {
   store.save('sessions', session);
   const plan = store.get('plans', session.studentId);
   if (session.fromPlan && plan && !plan.used) store.save('plans', { ...plan, used: true });
+  rememberSwaps(session.rows, session.demo);
 }
 
 /** Closes classes left open on earlier days. */
@@ -89,8 +92,7 @@ export function recordView({ studentId, kind }) {
   const finishButton = button(session.status === 'done' ? '更新完成' : '完成上課', () => openFinishSheet(), '');
   const progressFill = h('div', { class: 'progress-fill' });
   const guideText = h('span', { class: 'guide-text', role: 'status' });
-  const stepDots = [h('span', { class: 'step-dot' }), h('span', { class: 'step-dot' }), h('span', { class: 'step-dot' })];
-  const guide = h('div', { class: 'guide' }, icon('arrow'), guideText, h('span', { class: 'steps', 'aria-hidden': 'true' }, stepDots));
+  const guide = h('div', { class: 'guide' }, icon('arrow'), guideText);
 
   function setMode(next) {
     mode = next;
@@ -211,7 +213,8 @@ export function recordView({ studentId, kind }) {
         sets.push(cell);
       }
       cells.push({ name, cells: rowCells });
-      tableBody.append(h('div', { class: 'grid-row' }, name, sets));
+      const swap = h('button', { type: 'button', class: 'grid-swap', 'aria-label': `換掉 ${row.name}`, onclick: () => openSwap(r) }, icon('swap'));
+      tableBody.append(h('div', { class: 'grid-row' }, h('div', { class: 'grid-lead' }, name, swap), sets));
     });
   }
 
@@ -237,6 +240,7 @@ export function recordView({ studentId, kind }) {
     cell.classList.toggle('is-done', set.done);
     cell.classList.toggle('is-changed', changed);
     cell.classList.toggle('is-next', isSelected && !set.done && mode === 'set');
+    cell.classList.toggle('is-spring', row.kind === 'pilates');
     a.textContent = row.kind === 'pilates' ? (set.spring || '—') : (set.weight || '自體');
     b.textContent = set.reps;
     cell.setAttribute('aria-label', `${row.name} 第${SET_NAMES[s]}組 ${a.textContent} ${b.textContent} 下${set.done ? ' 已完成' : ''}`);
@@ -293,11 +297,6 @@ export function recordView({ studentId, kind }) {
     const allDone = isAllDone();
     finishButton.classList.toggle('primary', allDone);
     finishButton.classList.toggle('is-ready', allDone && session.status !== 'done');
-    const phase = mode === 'vitals' ? 0 : allDone ? 2 : 1;
-    stepDots.forEach((dot, i) => {
-      dot.classList.toggle('is-now', i === phase);
-      dot.classList.toggle('is-done', i < phase);
-    });
     const message = guideMessage();
     if (message !== lastGuide) {
       lastGuide = message;
@@ -310,6 +309,7 @@ export function recordView({ studentId, kind }) {
   }
 
   function refresh() {
+    screen.classList.toggle('is-vitals', mode === 'vitals');
     session.rows.forEach((row, r) => {
       paintName(r);
       for (let s = 0; s < MAX_SETS; s++) paintCell(r, s);
@@ -333,6 +333,21 @@ export function recordView({ studentId, kind }) {
     renderPanel();
   }
 
+  /** Types a value directly and carries it to the later sets still to do, like the buttons do. */
+  function typeSet(field, label, unit) {
+    const row = session.rows[selected.row];
+    numberSheet(`${row.name} ${label}`, row.sets[selected.set][field], unit, field === 'weight', (value) => {
+      bumped = field;
+      mutate(() => {
+        for (let s = selected.set; s < row.sets.length; s++) {
+          if (s === selected.set || !row.sets[s].done) row.sets[s][field] = value;
+        }
+      });
+      for (let s = selected.set; s < MAX_SETS; s++) paintCell(selected.row, s);
+      renderPanel();
+    });
+  }
+
   function stepper(label, value, field, steps, unit) {
     const make = (delta) => h('button', {
       type: 'button',
@@ -342,38 +357,30 @@ export function recordView({ studentId, kind }) {
       onclick: () => adjustSet(field, delta),
     }, `${delta > 0 ? '+' : '−'}${Math.abs(delta)}`);
     return h('div', { class: 'stepper' },
-      h('div', { class: 'stepper-label' }, label),
       h('div', { class: 'stepper-row' },
+        h('div', { class: 'stepper-label' }, label),
         make(-steps[1]), make(-steps[0]),
-        h('div', { class: `stepper-value${bumped === field ? ' bump' : ''}` }, value, unit ? h('small', {}, unit) : ''),
+        h('button', {
+          type: 'button',
+          class: `stepper-value value-tap${bumped === field ? ' bump' : ''}`,
+          'aria-label': `${label} ${value}，點一下直接輸入`,
+          onclick: () => typeSet(field, label, unit),
+        }, value, unit ? h('small', {}, unit) : ''),
         make(steps[0]), make(steps[1])));
   }
 
   function springEditor(row, set) {
-    const spring = springFromText(set.spring);
-    const update = (next) => {
+    const update = (text) => {
       mutate(() => {
         for (let s = selected.set; s < row.sets.length; s++) {
           if (s > selected.set && row.sets[s].done) continue;
-          row.sets[s].spring = springToText(next);
+          row.sets[s].spring = text;
         }
       });
       for (let s = selected.set; s < MAX_SETS; s++) paintCell(selected.row, s);
       renderPanel();
     };
-    return h('div', { class: 'stepper' },
-      h('div', { class: 'stepper-label' }, '彈簧'),
-      h('div', { class: 'stepper-value spring-value' }, set.spring || '未設定'),
-      h('div', { class: 'chips' },
-        SPRING_COLORS.map((color) => h('button', {
-          type: 'button',
-          class: 'btn chip-btn',
-          'data-repeat': true,
-          onclick: () => { spring.counts[color] += 1; update(spring); },
-        }, `+${color}`)),
-        button('清除', () => update({ counts: { r: 0, b: 0, y: 0, g: 0 }, bar: '' }), 'chip-btn')),
-      h('div', { class: 'chips' },
-        SPRING_BARS.map((bar) => button(bar, () => { spring.bar = spring.bar === bar ? '' : bar; update(spring); }, 'chip-btn', { 'aria-pressed': spring.bar === bar ? 'true' : 'false' }))));
+    return springControls(set.spring || '', update, commonSprings(store.all('sessions'), 4));
   }
 
   function addedOptions(type) {
@@ -404,18 +411,20 @@ export function recordView({ studentId, kind }) {
     const open = row.sets.findIndex((s) => !s.done);
     return [
       h('div', { class: 'panel-head' },
-        h('strong', {}, row.name),
-        set && h('span', { class: 'muted' }, `第${SET_NAMES[selected.set]}組・${planText}`)),
+        h('div', { class: 'panel-title' },
+          h('strong', {}, row.name),
+          set && h('span', { class: 'muted' }, `第${SET_NAMES[selected.set]}組・${planText}`)),
+        h('button', { type: 'button', class: 'btn swap-btn', onclick: () => openSwap(selected.row) }, icon('swap'), h('span', {}, '換動作'))),
       set && (row.kind === 'pilates' ? springEditor(row, set) : stepper('重量', set.weight, 'weight', [1, 2.5], 'kg')),
       set && stepper('次數', set.reps, 'reps', [1, 2]),
       set && !set.done && h('button', {
         type: 'button',
-        class: 'btn big primary',
+        class: 'btn big primary pinned',
         onclick: () => tapSet(selected.row, selected.set),
       }, icon('check'), `第${SET_NAMES[selected.set]}組做完了`),
       set?.done && open !== -1 && h('button', {
         type: 'button',
-        class: 'btn big primary',
+        class: 'btn big primary pinned',
         onclick: () => { moveOn(selected.row); refresh(); },
       }, `回到第${SET_NAMES[open]}組`, icon('arrow')),
       set && h('div', { class: 'panel-actions' },
@@ -423,6 +432,7 @@ export function recordView({ studentId, kind }) {
           mutate(() => row.sets.forEach((s) => { s.done = true; }));
           moveOn(selected.row);
           refresh();
+          toast(`${row.name} 已全部標為做完`, { label: '復原', run: undo });
         }, ''),
         set.done && button('這組沒做', () => {
           mutate(() => { set.done = false; });
@@ -593,6 +603,23 @@ export function recordView({ studentId, kind }) {
     }), { wide: true });
   }
 
+  /** Two taps from anywhere in class: the swap button, then the replacement. */
+  function openSwap(r) {
+    const row = session.rows[r];
+    const current = store.get('exercises', row.exerciseId) || { id: row.exerciseId, name: row.name, kind: row.kind };
+    const history = doneSessions(store.all('sessions'), session.studentId).filter((s) => s.id !== session.id);
+    openSheet(`把 ${row.name} 換成`, (close) => exercisePicker(row.kind, (exercise) => {
+      close();
+      let target = r;
+      mutate(() => { target = swapRow(session.rows, r, exercise, history); });
+      selected = { row: target, set: 0 };
+      mode = 'set';
+      buildGrid();
+      refresh();
+      toast(`已換成 ${exercise.name}`, { label: '復原', run: undo });
+    }, { current }), { wide: true });
+  }
+
   function openPainSheet(row) {
     const scores = Object.fromEntries(painList(row).filter((p) => p.part).map((p) => [p.part, p.score]));
     let active = Object.keys(scores).at(-1) || null;
@@ -757,26 +784,23 @@ export function recordView({ studentId, kind }) {
         undoButton,
         finishButton)),
     h('div', { class: 'progress', 'aria-hidden': 'true' }, progressFill),
+    guide,
     (student.contraindications || student.nextNotes) && h('div', { class: 'banner' },
       icon('warn'),
       h('div', {},
         student.contraindications && h('p', {}, `禁忌：${student.contraindications}`),
         student.nextNotes && h('p', {}, `注意：${student.nextNotes}`))),
-    guide,
     h('div', { class: 'vitals' }, vitalsBp, vitalsHr, vitalsFlags, noteButton),
     h('div', { class: 'record-main' },
       h('div', { class: 'grid' },
-        h('div', { class: 'grid-head' }, h('span', {}, '動作', h('small', { class: 'head-hint' }, row0Label(session))), SET_NAMES.map((n) => h('span', {}, `第${n}組`))),
-        tableBody,
-        h('button', { type: 'button', class: 'btn add-row', onclick: openPicker }, icon('plus'), '加入動作')),
+        h('div', { class: 'grid-head' },
+          h('button', { type: 'button', class: 'grid-add', 'aria-label': '加入動作', onclick: openPicker }, icon('plus'), h('span', { class: 'grid-add-text' }, '加入動作')),
+          SET_NAMES.map((n) => h('span', {}, `第${n}組`))),
+        tableBody),
       panel));
 
   refresh();
   return screen;
-}
-
-function row0Label(session) {
-  return session.kind === 'pilates' ? '（彈簧｜次數）' : '（重量｜次數）';
 }
 
 /** A drawing area for signatures. Stored small so each class stays a few kilobytes. */

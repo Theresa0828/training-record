@@ -125,18 +125,18 @@ export function overviewView({ studentId }) {
       backButton(),
       h('h1', {}, student.name),
       button('編輯資料', () => editProfileSheet(student), 'ghost')),
-    h('main', { class: 'page stack' },
-      h('section', { class: `first-card rise${student.contraindications || pains.length ? ' is-alert' : ''}` },
+    h('main', { class: 'page bento' },
+      h('section', { class: `first-card rise span-4${student.contraindications || pains.length ? ' is-alert' : ''}` },
         h('div', { class: 'card-title' }, icon('warn'), h('span', {}, '疼痛與禁忌')),
         student.contraindications
           ? h('p', { class: 'contra' }, student.contraindications)
           : h('div', { class: 'row-between' }, h('p', {}, '還沒填寫'), button('現在填寫', () => editProfileSheet(student), needsProfile ? 'primary' : '')),
         pains.length > 0 && h('ul', { class: 'plain-list' }, pains.slice(0, 5).map((p) => h('li', {},
           `${shortDate(p.date)} ${p.exercise}：${p.text}${p.note ? `（${p.note}）` : ''}`)))),
-      h('section', { class: 'first-card rise' },
+      h('section', { class: 'first-card rise span-2' },
         h('div', { class: 'card-title' }, icon('clock'), h('span', {}, '下次要注意的事')),
         student.nextNotes ? h('p', { class: 'contra' }, student.nextNotes) : h('p', { class: 'muted' }, '沒有註記')),
-      h('section', { class: 'first-card rise' },
+      h('section', { class: 'first-card rise span-6' },
         h('div', { class: 'card-title' }, icon('check'), h('span', {}, '上次完成情況')),
         last ? [
           h('div', { class: 'last-summary' },
@@ -166,7 +166,7 @@ export function overviewView({ studentId }) {
 }
 
 function fold(title, ...body) {
-  return h('details', { class: 'fold' },
+  return h('details', { class: 'fold span-6' },
     h('summary', {}, h('span', {}, title), icon('next')),
     h('div', { class: 'fold-body' }, body));
 }

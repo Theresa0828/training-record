@@ -5,6 +5,7 @@ import { signaturePad } from './record.js';
 import { loadDemo, clearDemo } from './demo.js';
 
 export const PALETTES = [
+  ['mist', '霧白＋青藍', ['#F1EEE3', '#9DBBAE', '#188FA7', '#36311F']],
   ['dawn', '砂色＋深青', ['#ECE6CF', '#9DBBAE', '#188FA7', '#0F6E82']],
   ['bordeaux', '砂色＋酒紅', ['#E2DBBE', '#D5D6AA', '#987D7C', '#420C14']],
   ['cyan', '砂色＋青藍', ['#E2DBBE', '#9DBBAE', '#769FB6', '#188FA7']],
@@ -90,7 +91,7 @@ function signatureSection() {
 }
 
 function paletteSection() {
-  const current = store.getMeta('palette', 'dawn');
+  const current = store.getMeta('palette', 'mist');
   return h('section', { class: 'stack settings-card' },
     h('h2', {}, '配色'),
     h('div', { class: 'palette-grid' }, PALETTES.map(([id, name, colors]) => h('button', {

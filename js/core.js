@@ -1,7 +1,7 @@
 // Pure logic with no DOM or storage access, so it can run under `node --test`.
 
 export const MAX_SETS = 5;
-export const DEFAULT_TAGS = ['左肩痛', '腰代償', '脖子代償', '肩胛代償', '膝代償', '角度不夠', '太重', '太輕', '縮小腹太多'];
+export const DEFAULT_TAGS = ['左肩痛', '腰代償', '脖子代償', '肩胛代償', '膝代償', '角度不夠', '太重', '太輕', '縮小腹太多', '骨盆後傾', '肋骨外翻', '肩膀代償'];
 export const DEFAULT_PROPS = ['滾筒', '彈力帶', '瑜珈球', 'Box'];
 export const APPARATUS = ['Reformer', 'Cadillac', 'Chair', 'Mat', 'Arc Barrel', 'Spine Corrector'];
 export const ASSIST_LEVELS = ['無', '少', '中', '多'];
@@ -317,6 +317,7 @@ export function rowDetails(row) {
   const pain = painText(row);
   return [
     row.rpe ? `RPE ${row.rpe}` : '',
+    row.replacedFrom ? `由 ${row.replacedFrom.name} 換來` : '',
     pain ? `痛 ${pain}` : '',
     row.painNote ? `疼痛附註：${row.painNote}` : '',
     row.quality ? `品質 ${row.quality}` : '',
@@ -343,4 +344,86 @@ export function recentPain(history, limit = 5) {
     }
   }
   return items;
+}
+
+/** How many times each exercise has been used, for putting the familiar ones first. */
+export function usageCounts(sessions) {
+  const counts = new Map();
+  for (const session of sessions) {
+    for (const row of session.rows || []) counts.set(row.exerciseId, (counts.get(row.exerciseId) || 0) + 1);
+  }
+  return counts;
+}
+
+const squeeze = (text) => String(text || '').toLowerCase().replace(/\s+/g, '');
+
+/** Matches the name, the group or another name for it, ignoring spaces and capitals. */
+export function searchExercises(items, query) {
+  const wanted = squeeze(query);
+  if (!wanted) return items;
+  return items.filter((item) => [item.name, item.group, ...(item.aliases || [])].some((text) => squeeze(text).includes(wanted)));
+}
+
+/** The quick list: the ones the teacher pinned, then the most used. */
+export function commonExercises(items, usage, excludeId = null, limit = 12) {
+  return items
+    .filter((item) => item.id !== excludeId && (item.pinned || usage.get(item.id)))
+    .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (usage.get(b.id) || 0) - (usage.get(a.id) || 0))
+    .slice(0, limit);
+}
+
+/** What to offer in place of an exercise: its own alternatives, or else the same group, most used first. */
+export function swapOptions(current, items, usage, limit = 8) {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const own = (current?.alternatives || []).map((id) => byId.get(id)).filter((item) => item && item.id !== current.id);
+  if (own.length) return { sameGroup: false, list: own.slice(0, limit) };
+  const list = items
+    .filter((item) => item.id !== current?.id && current?.group && item.group === current.group)
+    .sort((a, b) => (usage.get(b.id) || 0) - (usage.get(a.id) || 0))
+    .slice(0, limit);
+  return { sameGroup: true, list };
+}
+
+/**
+ * Replaces an exercise and returns the new row's position. Sets already done stay on the old exercise,
+ * because that is what the student really did; only the sets left move to the new one. The numbers come
+ * from the last time this student did the new exercise, since a squat's weight says nothing about a leg press.
+ */
+export function swapRow(rows, index, exercise, history = []) {
+  const row = rows[index];
+  const done = row.sets.filter((set) => set.done).length;
+  const left = row.sets.filter((set) => !set.done);
+  const past = exerciseHistory(exercise.id, history)[0]?.row;
+  const pastSet = past ? [...past.sets].reverse().find((set) => set.done) || past.sets[0] : null;
+  const fresh = makeRow(exercise, left.length || row.sets.length || 3, {
+    weight: pastSet?.weight ?? 0,
+    spring: pastSet?.spring ?? '',
+    reps: pastSet?.reps ?? left[0]?.reps ?? row.sets[0]?.reps ?? 10,
+  });
+  fresh.replacedFrom = { id: row.exerciseId, name: row.name };
+  if (!done) {
+    rows.splice(index, 1, fresh);
+    return index;
+  }
+  row.sets = row.sets.filter((set) => set.done);
+  rows.splice(index + 1, 0, fresh);
+  return index + 1;
+}
+
+/** Puts a swap the teacher really kept at the front of that exercise's alternatives. */
+export function learnAlternative(exercise, replacementId, limit = 8) {
+  return [replacementId, ...(exercise.alternatives || []).filter((id) => id !== replacementId)].slice(0, limit);
+}
+
+/** The spring settings used most, so a usual setting takes one tap. */
+export function commonSprings(sessions, limit = 6) {
+  const counts = new Map();
+  for (const session of sessions) {
+    for (const row of session.rows || []) {
+      for (const set of row.sets || []) {
+        if (set.spring) counts.set(set.spring, (counts.get(set.spring) || 0) + 1);
+      }
+    }
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([spring]) => spring);
 }

@@ -1,11 +1,11 @@
 // Serves the app from the device so it opens instantly and works offline.
 // Bump VERSION on every release so devices fetch the new files.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = `training-record-${VERSION}`;
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png',
   'fonts/fonts.css',
-  'js/main.js', 'js/dom.js', 'js/icons.js', 'js/bodymap.js', 'js/trend.js', 'js/students.js', 'js/core.js', 'js/seed.js', 'js/store.js', 'js/sync.js', 'js/demo.js',
+  'js/main.js', 'js/spring.js', 'js/numpad.js', 'js/dom.js', 'js/icons.js', 'js/bodymap.js', 'js/trend.js', 'js/students.js', 'js/core.js', 'js/seed.js', 'js/store.js', 'js/sync.js', 'js/demo.js',
   'js/today.js', 'js/record.js', 'js/overview.js', 'js/plan.js', 'js/library.js', 'js/settings.js', 'js/print.js',
 ];
 // The rounded typeface, split by character range. Stored up front so it also shows offline.

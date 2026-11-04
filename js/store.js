@@ -49,6 +49,9 @@ export async function loadStore() {
   for (const exercise of SEED_EXERCISES) {
     if (!memory.exercises.has(exercise.id)) memory.exercises.set(exercise.id, exercise);
   }
+  // Whatever is still waiting goes to disk before the page can be closed or frozen.
+  window.addEventListener('pagehide', () => { flush(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
   // Ask iOS not to clear this data under storage pressure.
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 }
@@ -77,7 +80,7 @@ function queue(store, record) {
 
 function flushSoon() {
   if (flushTimer) return;
-  flushTimer = setTimeout(flush, 150);
+  flushTimer = setTimeout(flush, 30);
 }
 
 function writeBatch(batch) {

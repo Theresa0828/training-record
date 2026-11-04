@@ -123,7 +123,8 @@ export function dismissActionToast() {
 
 export function toast(message, action) {
   document.querySelector('.toast')?.remove();
-  const el = h('div', { class: `toast${action ? ' has-action' : ''}`, role: 'status' }, h('span', {}, message),
+  const top = document.querySelector('.record') ? ' toast-top' : '';
+  const el = h('div', { class: `toast${top}${action ? ' has-action' : ''}`, role: 'status' }, h('span', {}, message),
     action && button(action.label, () => { el.remove(); action.run(); }, 'ghost'));
   document.body.append(el);
   clearTimeout(toastTimer);
