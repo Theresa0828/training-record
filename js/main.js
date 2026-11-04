@@ -10,7 +10,14 @@ import { libraryView } from './library.js';
 import { settingsView } from './settings.js';
 import { studentsView } from './students.js';
 
+// A button that fails must say so. Silence looks like the tap never landed.
+function reportFailure(reason) {
+  toast(`這個操作沒有完成：${reason?.message || reason || '未知原因'}`);
+}
+
 async function boot() {
+  window.addEventListener('error', (e) => reportFailure(e.error || e.message));
+  window.addEventListener('unhandledrejection', (e) => reportFailure(e.reason));
   installTapGuard();
   installKeyboardLift();
   await store.loadStore();

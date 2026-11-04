@@ -147,12 +147,13 @@ export function confirmSheet(title, message, confirmLabel, onConfirm) {
 export function installTapGuard() {
   const EDGE = 12;
   const MOVE_LIMIT = 12;
-  const PALM_SIZE = 60;
+  const PALM_SIZE = 150; // iPad reports a normal fingertip as 40-110 wide, so only a real palm passes this.
   const DOUBLE_TAP_MS = 280;
   const DOUBLE_TAP_DISTANCE = 30;
   const TWO_FINGER_MS = 120;
   const active = new Map();
   let down = null;
+  let moved = false;
   let blocked = false;
   let lastTap = null;
 
@@ -161,6 +162,7 @@ export function installTapGuard() {
   document.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse') {
       blocked = false;
+      moved = false;
       down = { x: e.clientX, y: e.clientY };
       return;
     }
@@ -176,7 +178,15 @@ export function installTapGuard() {
     const now = performance.now();
     blocked = [...active.values()].some((time) => now - time < TWO_FINGER_MS);
     active.set(e.pointerId, now);
+    moved = false;
     down = { x: e.clientX, y: e.clientY };
+  }, true);
+
+  // Measured while the finger moves. The click's own position cannot be used, because iOS
+  // snaps a slightly missed tap onto the nearest button, which looks like movement.
+  document.addEventListener('pointermove', (e) => {
+    if (!down || (e.pointerType !== 'mouse' && !active.has(e.pointerId))) return;
+    if (Math.abs(e.clientX - down.x) > MOVE_LIMIT || Math.abs(e.clientY - down.y) > MOVE_LIMIT) moved = true;
   }, true);
 
   const release = (e) => active.delete(e.pointerId);
@@ -186,7 +196,6 @@ export function installTapGuard() {
   document.addEventListener('click', (e) => {
     const target = e.target.closest('button, [data-tap]');
     if (!target || e.detail === 0) return;
-    const moved = down && (Math.abs(e.clientX - down.x) > MOVE_LIMIT || Math.abs(e.clientY - down.y) > MOVE_LIMIT);
     const now = performance.now();
     // Compared by place, because the panel rebuilds its buttons after every tap.
     const repeated = lastTap && now - lastTap.time < DOUBLE_TAP_MS && !target.hasAttribute('data-repeat')
