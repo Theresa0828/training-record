@@ -1,5 +1,5 @@
 // Common strength exercises to start from. The teacher edits this list inside the app.
-// Pilates exercises come from the teacher's own data through 動作庫 > 批次匯入.
+// Pilates exercises come from the teacher's own handout through 動作庫 > 匯入講義. The handout is never stored in this folder.
 const STRENGTH = [
   ['下肢', ['深蹲', '高腳杯深蹲', '前蹲舉', '箱上深蹲', '硬舉', '羅馬尼亞硬舉', '相撲硬舉', '六角槓硬舉', '分腿蹲', '保加利亞分腿蹲', '弓箭步', '後跨弓箭步', '登階', '腿推', '腿伸屈', '腿彎舉', '臀推', '橋式', '單腿橋式', '提踵', '側向弓箭步', '蚌殼式']],
   ['胸', ['臥推', '啞鈴臥推', '上斜臥推', '上斜啞鈴臥推', '伏地挺身', '夾胸機', '繩索夾胸']],

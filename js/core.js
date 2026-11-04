@@ -227,6 +227,41 @@ export function collectionForFile(file) {
   return file.startsWith('sessions-') ? 'sessions' : file;
 }
 
+/** A handout file comes from the teacher's own computer, but it is still checked before it is stored. */
+export function isHandoutFile(data) {
+  if (data?.format !== 'training-record-handout' || data.version !== 1) return false;
+  if (!data.images || typeof data.images !== 'object' || !Array.isArray(data.exercises) || !data.exercises.length) return false;
+  return data.exercises.every((e) => typeof e?.id === 'string' && e.id
+    && typeof e.name === 'string' && e.name.trim()
+    && typeof e.group === 'string'
+    && e.fields && typeof e.fields === 'object'
+    && Array.isArray(e.noteImages) && e.noteImages.every((path) => typeof data.images[path] === 'string')
+    && (!e.chartImage || typeof data.images[e.chartImage] === 'string'));
+}
+
+/**
+ * Importing twice is safe. An exercise from an earlier import stays as the teacher left it,
+ * even if renamed or removed; one the teacher already added by the same name gains the handout.
+ */
+export function planHandoutImport(file, active, getById) {
+  const byName = new Map(active.filter((e) => e.kind === 'pilates').map((e) => [e.name, e]));
+  const add = [];
+  const link = [];
+  for (const item of file.exercises) {
+    const id = `hd_${item.id}`;
+    if (getById(id)) continue;
+    const same = byName.get(item.name);
+    if (same) {
+      if (!same.handoutId) link.push({ ...same, handoutId: item.id, order: item.order });
+      continue;
+    }
+    const exercise = { id, name: item.name, group: item.group, kind: 'pilates', handoutId: item.id, order: item.order };
+    add.push(exercise);
+    byName.set(item.name, exercise);
+  }
+  return { add, link };
+}
+
 /** Bookings from the calendar that have no unused plan yet, for the "needs planning" list. */
 export function studentsNeedingPlan(events, students, plans, today) {
   const seen = new Set();

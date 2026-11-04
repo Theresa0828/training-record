@@ -7,6 +7,7 @@ import {
 } from './core.js';
 import { kindLabel } from './today.js';
 import { exercisePicker, rememberSwaps } from './library.js';
+import { handoutButton } from './handout.js';
 import { springEditor as springControls } from './spring.js';
 import { numberSheet } from './numpad.js';
 import { icon } from './icons.js';
@@ -414,7 +415,9 @@ export function recordView({ studentId, kind }) {
         h('div', { class: 'panel-title' },
           h('strong', {}, row.name),
           set && h('span', { class: 'muted' }, `第${SET_NAMES[selected.set]}組・${planText}`)),
-        h('button', { type: 'button', class: 'btn swap-btn', onclick: () => openSwap(selected.row) }, icon('swap'), h('span', {}, '換動作'))),
+        h('div', { class: 'row-wrap' },
+          handoutButton(row.exerciseId),
+          h('button', { type: 'button', class: 'btn swap-btn', onclick: () => openSwap(selected.row) }, icon('swap'), h('span', {}, '換動作')))),
       set && (row.kind === 'pilates' ? springEditor(row, set) : stepper('重量', set.weight, 'weight', [1, 2.5], 'kg')),
       set && stepper('次數', set.reps, 'reps', [1, 2]),
       set && !set.done && h('button', {

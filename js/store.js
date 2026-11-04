@@ -3,7 +3,9 @@ import { SEED_EXERCISES } from './seed.js';
 
 const DB_NAME = 'training-record';
 const COLLECTIONS = ['students', 'exercises', 'sessions', 'plans', 'events', 'options'];
-const STORES = [...COLLECTIONS, 'outbox', 'meta'];
+// Handout text and images stay on this device: never in memory, never synced.
+const HANDOUT_STORES = ['handout', 'handoutImages'];
+const STORES = [...COLLECTIONS, 'outbox', 'meta', ...HANDOUT_STORES];
 
 let db = null;
 const memory = { students: new Map(), exercises: new Map(), sessions: new Map(), plans: new Map(), events: new Map(), options: new Map() };
@@ -19,7 +21,7 @@ export function onSaveError(listener) {
 
 function open() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 2);
+    const request = indexedDB.open(DB_NAME, 3);
     request.onupgradeneeded = () => {
       for (const name of STORES) {
         if (!request.result.objectStoreNames.contains(name)) {
@@ -192,6 +194,59 @@ export function eraseStudent(studentId) {
   }
   if (memory.plans.has(studentId)) stamp('plans', memory.plans.get(studentId));
   if (memory.students.has(studentId)) stamp('students', memory.students.get(studentId));
+}
+
+function readOne(name, id) {
+  return new Promise((resolve, reject) => {
+    const request = db.transaction(name).objectStore(name).get(id);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+/** iOS can close the database while the app is in the background, so reopen once. */
+async function readHandoutRecord(name, id) {
+  try {
+    return await readOne(name, id);
+  } catch {
+    db = await open();
+    return readOne(name, id);
+  }
+}
+
+export function readHandout(id) {
+  return readHandoutRecord('handout', id);
+}
+
+export function readHandoutImage(id) {
+  return readHandoutRecord('handoutImages', id);
+}
+
+/** Stores a whole handout file in one step, so a failed import leaves the old data as it was. */
+export async function saveHandout(file) {
+  try {
+    await writeHandout(file);
+  } catch (error) {
+    if (error?.name === 'QuotaExceededError') throw error;
+    // iOS can close the database while the app is in the background, so reopen once.
+    db = await open();
+    await writeHandout(file);
+  }
+}
+
+function writeHandout(file) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(HANDOUT_STORES, 'readwrite');
+    const entries = tx.objectStore('handout');
+    const images = tx.objectStore('handoutImages');
+    for (const { id, pages, springs, reps, noteImages, chartImage, fields } of file.exercises) {
+      entries.put({ id, source: file.source, pages, springs, reps, noteImages, chartImage, fields });
+    }
+    for (const [id, data] of Object.entries(file.images)) images.put({ id, data });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
 }
 
 export function exportAll() {

@@ -518,3 +518,21 @@ h1 small, .stepper-value small { font-weight: 400; }
   table.mre td.signs img { height: 7mm; max-width: 45%; }
   table.mre tr.shade td.name, table.mre tr.shade td.sub { background: #eee; }
 }
+
+/* Handout details */
+.handout-block { display: grid; gap: 2px; }
+.handout-text { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.handout-reference { margin: 0; padding: 10px 14px; border-radius: 16px; background: var(--soft); }
+.file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.note-frame { overflow: auto; overscroll-behavior: contain; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); }
+.note-loading { margin: 0; padding: 24px 16px; }
+.note-page { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; touch-action: pan-x pan-y; }
+.note-page img { display: block; width: 100%; height: auto; }
+.note-frame.is-zoomed { max-height: 72vh; }
+.note-frame.is-zoomed .note-page { width: 220%; cursor: zoom-out; }
+.fold-body { padding: 0 16px 16px; }
+.handout-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); grid-template-columns: none; }
+.library-bar { flex-wrap: wrap; }
+.library-bar h1 { white-space: nowrap; flex: 1 1 auto; }
+@media (max-width: 480px) { .library-bar h1 { flex-basis: 100%; } }
+.library-bar .topbar-actions { max-width: 100%; flex-wrap: wrap; margin-left: 0; }

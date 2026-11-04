@@ -3,6 +3,7 @@ import { h, button, back, backButton, go, openSheet, toast, dismissActionToast }
 import * as store from './store.js';
 import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, sessionSummary, swapRow, commonSprings } from './core.js';
 import { exercisePicker, rememberSwaps } from './library.js';
+import { handoutButton } from './handout.js';
 import { springEditor } from './spring.js';
 import { numberSheet } from './numpad.js';
 import { icon } from './icons.js';
@@ -140,6 +141,7 @@ export function planView({ studentId }) {
       h('div', { class: 'row-between' },
         h('strong', {}, `${index + 1}. ${row.name}`),
         h('div', { class: 'row-wrap' },
+          handoutButton(row.exerciseId),
           h('button', { type: 'button', class: 'btn swap-btn', onclick: () => swapExercise(row, index) }, icon('swap'), h('span', {}, '換動作')),
           button('上移', () => change(() => { plan.rows.splice(index - 1, 0, plan.rows.splice(index, 1)[0]); }), 'ghost', { disabled: index === 0 }),
           button('移除', () => {

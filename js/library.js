@@ -1,11 +1,15 @@
 import { h, button, tabBar, openSheet, toast, refreshView } from './dom.js';
 import * as store from './store.js';
 import { newId, APPARATUS, usageCounts, searchExercises, commonExercises, swapOptions, learnAlternative } from './core.js';
+import { handoutSheet, importHandoutSheet } from './handout.js';
 
 function byKind(kind) {
   return store.all('exercises')
     .filter((e) => e.kind === kind)
-    .sort((a, b) => (a.group || '').localeCompare(b.group || '', 'zh-Hant') || a.name.localeCompare(b.name, 'zh-Hant'));
+    .sort((a, b) => (a.group || '').localeCompare(b.group || '', 'zh-Hant')
+      // Handout exercises keep the book's order; anything added by hand follows, by name.
+      || (a.order ?? Infinity) - (b.order ?? Infinity) || 0
+      || a.name.localeCompare(b.name, 'zh-Hant'));
 }
 
 function groupsOf(items, kind) {
@@ -235,15 +239,16 @@ export function libraryView() {
     }
     return h('section', { class: 'stack span-6' },
       h('h2', {}, `${title}（${items.length}）`),
-      items.length === 0 && h('p', { class: 'muted' }, '還沒有動作，可以按「批次匯入」。'),
+      items.length === 0 && h('p', { class: 'muted' }, kind === 'pilates' ? '還沒有動作，可以按「匯入講義」。' : '還沒有動作，可以按「批次匯入」。'),
       h('div', { class: 'bento' }, [...groups.entries()].map(([group, list]) => h('div', { class: `card stack-sm ${list.length > 10 ? 'span-6' : 'span-3'}` },
         h('h3', {}, group),
-        h('div', { class: 'pick-grid' }, list.map((exercise) => button(exercise.pinned ? `★ ${exercise.name}` : exercise.name, () => editSheet(exercise), 'pick')))))));
+        h('div', { class: 'pick-grid' }, list.map((exercise) => button(exercise.pinned ? `★ ${exercise.name}` : exercise.name, () => (exercise.handoutId ? handoutSheet(exercise, { onEdit: editSheet }) : editSheet(exercise)), 'pick')))))));
   };
   return h('div', { class: 'screen has-tabs' },
-    h('header', { class: 'topbar page-title' },
+    h('header', { class: 'topbar page-title library-bar' },
       h('h1', {}, '動作庫'),
       h('div', { class: 'topbar-actions' },
+        button('匯入講義', importHandoutSheet, 'ghost'),
         button('批次匯入', importSheet, 'ghost'),
         button('＋ 新增動作', () => addExerciseSheet('strength', '', null, () => refreshView()), 'primary'))),
     h('main', { class: 'page stack-lg' }, section('pilates', '皮拉提斯'), section('strength', '重訓')),
