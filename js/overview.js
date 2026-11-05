@@ -1,10 +1,11 @@
 // Everything needed to understand a student in under a minute, most important first.
-import { h, button, backButton, go, back, home, openSheet, confirmSheet, toast } from './dom.js';
+import { h, button, backButton, go, back, home, openSheet, confirmSheet, toast, refreshView } from './dom.js';
 import * as store from './store.js';
-import { dateKey, doneSessions, sessionSummary, recentPain, exerciseTrend, isBpFlagged, findStudentByName, setText, rowDetails } from './core.js';
+import { classNumberSheet, nextDateSheet, nextDateText } from './classinfo.js';
+import { dateKey, doneSessions, nextClassNumber, classLabel, recentPain, exerciseTrend, isBpFlagged, findStudentByName, setText, rowDetails } from './core.js';
 import { kindLabel } from './today.js';
 import { exportPdf } from './print.js';
-import { icon, ring } from './icons.js';
+import { icon } from './icons.js';
 import { trendChart } from './trend.js';
 
 function shortDate(key) {
@@ -111,6 +112,9 @@ export function overviewView({ studentId }) {
   const inClass = store.all('sessions').some((s) => s.studentId === studentId && s.date === today && s.status === 'draft');
   const bookedToday = store.all('events').some((e) => e.date === today && e.student && findStudentByName([student], e.student));
   const needsProfile = !student.contraindications && !student.goal;
+  const todaySession = store.all('sessions').find((s) => s.studentId === studentId && s.date === today && s.classNo !== undefined);
+  const count = todaySession ? { no: todaySession.classNo, size: todaySession.packageSize } : nextClassNumber(history.filter((s) => s.date !== today), student);
+  const classText = classLabel(count.no, count.size);
   // Whatever this student needs next is the one big button.
   const classFirst = inClass || bookedToday || hasPlan;
   const trends = exerciseIds.map((id) => {
@@ -136,16 +140,23 @@ export function overviewView({ studentId }) {
       h('section', { class: 'first-card rise span-2' },
         h('div', { class: 'card-title' }, icon('clock'), h('span', {}, '下次要注意的事')),
         student.nextNotes ? h('p', { class: 'contra' }, student.nextNotes) : h('p', { class: 'muted' }, '沒有註記')),
+      h('button', { type: 'button', class: 'class-card rise span-3', onclick: () => classNumberSheet(studentId, todaySession, refreshView) },
+        h('span', { class: 'stepper-label' }, todaySession ? '今天' : '下一堂'),
+        h('strong', {}, classText || '還沒設定'),
+        h('span', { class: 'muted' }, classText ? (count.newTerm ? '新的一期，點一下修改' : count.no === count.size ? '這期最後一堂，點一下修改' : '點一下修改') : '點一下設定第幾堂')),
+      h('button', { type: 'button', class: 'class-card rise span-3', onclick: () => nextDateSheet(studentId, refreshView) },
+        h('span', { class: 'stepper-label' }, '下次上課'),
+        h('strong', {}, nextDateText(student).replace(/^下次 ?/, '')),
+        h('span', { class: 'muted' }, '點一下確認')),
       h('section', { class: 'first-card rise span-6' },
-        h('div', { class: 'card-title' }, icon('check'), h('span', {}, '上次完成情況')),
+        h('div', { class: 'card-title' }, icon('check'), h('span', {}, '上次上課')),
         last ? [
-          h('div', { class: 'last-summary' },
-            ring(sessionSummary(last).percent),
-            h('div', {},
-              h('p', {}, `${last.date.replaceAll('-', '/')}・${kindLabel(last.kind)}`),
-              h('p', { class: 'muted' }, `完成 ${sessionSummary(last).done}/${sessionSummary(last).planned} 組`,
-                last.bpSys ? `・血壓 ${last.bpSys}/${last.bpDia}${isBpFlagged(last.bpSys, last.bpDia) ? ' 偏高' : ''}` : '',
-                last.hr ? `・心跳 ${last.hr}` : ''))),
+          h('div', {},
+            h('p', {}, `${last.date.replaceAll('-', '/')}・${kindLabel(last.kind)}${last.classNo ? `・${classLabel(last.classNo, last.packageSize)}` : ''}`),
+            (last.bpSys || last.hr) && h('p', { class: 'muted' },
+              last.bpSys ? `血壓 ${last.bpSys}/${last.bpDia}${isBpFlagged(last.bpSys, last.bpDia) ? ' 偏高' : ''}` : '',
+              last.bpSys && last.hr ? '・' : '',
+              last.hr ? `心跳 ${last.hr}` : '')),
           Object.entries(last.flags || {}).some(([, v]) => v) && h('p', {}, '當天狀況：', Object.entries({ pain: '疼痛', sleep: '睡眠', diet: '飲食', mood: '心情' }).filter(([k]) => last.flags[k]).map(([, v]) => v).join('、')),
           last.special && h('p', {}, `特殊狀況：${last.special}`),
           last.note && h('p', {}, `備註：${last.note}`),
@@ -153,7 +164,7 @@ export function overviewView({ studentId }) {
         ] : h('p', { class: 'muted' }, '還沒有上課紀錄')),
       student.goal && fold('訓練目標', h('p', {}, student.goal)),
       trends.length > 0 && history.length > 1 && fold('重量趨勢', trends),
-      history.length > 1 && fold(`過去紀錄（${history.length}）`, history.slice(1).map((session) => button(`${session.date.replaceAll('-', '/')}・${kindLabel(session.kind)}・完成 ${sessionSummary(session).percent}%`, () => {
+      history.length > 1 && fold(`過去紀錄（${history.length}）`, history.slice(1).map((session) => button(`${session.date.replaceAll('-', '/')}・${kindLabel(session.kind)}${session.classNo ? `・${classLabel(session.classNo, session.packageSize)}` : ''}`, () => {
         openSheet(session.date.replaceAll('-', '/'), () => sessionTable(session), { wide: true });
       }, 'list-item'))),
       history.length > 0 && fold('匯出 PDF', [

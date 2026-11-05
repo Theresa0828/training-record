@@ -172,14 +172,64 @@ export function resolveStaleDraft(session, today) {
   return recorded ? 'finish' : 'discard';
 }
 
-export function sessionSummary(session) {
-  let planned = 0;
-  let done = 0;
-  for (const row of session.rows) {
-    planned += row.sets.length;
-    done += row.sets.filter((s) => s.done).length;
+/** A term is usually 12 or 24 classes. */
+export const PACKAGE_SIZES = [12, 24];
+
+/**
+ * The number for a new class. history is newest first and leaves out the class being opened.
+ * A number the teacher set by hand wins. With nothing known it stays empty, because a guess would count wrongly from then on.
+ */
+export function nextClassNumber(history, student) {
+  if (student?.classStart?.no) return { no: student.classStart.no, size: student.classStart.size };
+  const index = history.findIndex((s) => s.classNo);
+  const size = student?.packageSize || history[Math.max(index, 0)]?.packageSize || PACKAGE_SIZES[0];
+  if (index === -1) return { no: null, size };
+  const lastSize = history[index].packageSize || size;
+  const count = history[index].classNo + index + 1;
+  return count > lastSize ? { no: count - lastSize, size, newTerm: true } : { no: count, size: lastSize };
+}
+
+export function classLabel(no, size) {
+  return no ? `第 ${no} / ${size} 堂` : '';
+}
+
+export function addDays(key, days) {
+  const [y, m, d] = key.split('-').map(Number);
+  return dateKey(new Date(y, m - 1, d + days));
+}
+
+export function dateWithWeek(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return `${m}/${d}（${'日一二三四五六'[new Date(y, m - 1, d).getDay()]}）`;
+}
+
+/** The student's first booking after a day, read from the calendar. */
+export function nextBooking(student, events, today) {
+  const names = [student.name, ...(student.aliases || [])];
+  return events
+    .filter((e) => e.date > today && e.student && names.includes(e.student))
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0] || null;
+}
+
+/** A date the teacher confirmed counts until it passes; a calendar booking alone is only a suggestion. */
+export function nextClassInfo(student, events, today) {
+  const booking = nextBooking(student, events, today);
+  if (student.nextClassDate > today) {
+    return {
+      date: student.nextClassDate,
+      time: student.nextClassTime || (booking?.date === student.nextClassDate ? booking.time : ''),
+      confirmed: true,
+      conflict: !!booking && booking.date !== student.nextClassDate,
+    };
   }
-  return { planned, done, percent: planned ? Math.round((done / planned) * 100) : 0 };
+  return { date: booking?.date || '', time: booking?.time || '', confirmed: false, conflict: false };
+}
+
+/** Moves one exercise and returns where the given row ended up, so the selection stays on it. */
+export function moveRow(rows, from, to, keep = from) {
+  const kept = rows[keep];
+  rows.splice(to, 0, rows.splice(from, 1)[0]);
+  return rows.indexOf(kept);
 }
 
 export function setLabel(row, set, useActual = true) {

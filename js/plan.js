@@ -1,7 +1,7 @@
 // Plans the next class: starts from last time, then the teacher tweaks it.
 import { h, button, back, backButton, go, openSheet, toast, dismissActionToast } from './dom.js';
 import * as store from './store.js';
-import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, sessionSummary, swapRow, commonSprings } from './core.js';
+import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, swapRow, commonSprings } from './core.js';
 import { exercisePicker, rememberSwaps } from './library.js';
 import { handoutButton } from './handout.js';
 import { springEditor } from './spring.js';
@@ -191,7 +191,7 @@ export function planView({ studentId }) {
         student.contraindications && h('p', { class: 'contra' }, `禁忌：${student.contraindications}`),
         student.nextNotes && h('p', {}, `注意：${student.nextNotes}`),
         last
-          ? h('p', { class: 'muted' }, `已複製上次（${last.date.replaceAll('-', '/')}・${kindLabel(last.kind)}・完成 ${sessionSummary(last).percent}%）的實際內容`)
+          ? h('p', { class: 'muted' }, `已複製上次（${last.date.replaceAll('-', '/')}・${kindLabel(last.kind)}）的實際內容`)
           : h('p', { class: 'muted' }, '這位學生還沒有紀錄'),
         button('看完整總覽', () => go('overview', { studentId }), 'ghost')),
       list,

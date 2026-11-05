@@ -63,11 +63,11 @@ export function loadDemo() {
     }
     return rows;
   };
-  store.saveFromSync('sessions', session('demo_a3', 'demo_s1', dayOffset(-35), 'strength', makeStrength(12, 25)));
-  store.saveFromSync('sessions', session('demo_a4', 'demo_s1', dayOffset(-28), 'strength', makeStrength(14, 27.5)));
-  store.saveFromSync('sessions', session('demo_a5', 'demo_s1', dayOffset(-21), 'strength', makeStrength(14, 30)));
-  store.saveFromSync('sessions', session('demo_a1', 'demo_s1', dayOffset(-14), 'strength', makeStrength(16, 30)));
-  store.saveFromSync('sessions', session('demo_a2', 'demo_s1', dayOffset(-7), 'strength', makeStrength(16, 30, 3), { bpSys: 124, bpDia: 82, flags: { sleep: true } }));
+  store.saveFromSync('sessions', session('demo_a3', 'demo_s1', dayOffset(-35), 'strength', makeStrength(12, 25), { classNo: 2, packageSize: 12 }));
+  store.saveFromSync('sessions', session('demo_a4', 'demo_s1', dayOffset(-28), 'strength', makeStrength(14, 27.5), { classNo: 3, packageSize: 12 }));
+  store.saveFromSync('sessions', session('demo_a5', 'demo_s1', dayOffset(-21), 'strength', makeStrength(14, 30), { classNo: 4, packageSize: 12 }));
+  store.saveFromSync('sessions', session('demo_a1', 'demo_s1', dayOffset(-14), 'strength', makeStrength(16, 30), { classNo: 5, packageSize: 12 }));
+  store.saveFromSync('sessions', session('demo_a2', 'demo_s1', dayOffset(-7), 'strength', makeStrength(16, 30, 3), { bpSys: 124, bpDia: 82, flags: { sleep: true }, classNo: 6, packageSize: 12 }));
 
   const pilatesRow = (exercise, spring, reps) => {
     const row = makeRow(exercise, 2, { spring, reps });
@@ -79,7 +79,7 @@ export function loadDemo() {
   store.saveFromSync('sessions', session('demo_b1', 'demo_s2', dayOffset(-5), 'pilates', [
     pilatesRow(DEMO_PILATES[0], '2r1b m', 10), pilatesRow(DEMO_PILATES[1], '1r1b', 10),
     pilatesRow(DEMO_PILATES[2], '1r1y', 8), pilatesRow(DEMO_PILATES[3], '', 6),
-  ]));
+  ], { classNo: 23, packageSize: 24 }));
 
   const today = dayOffset(0);
   store.replaceEvents([

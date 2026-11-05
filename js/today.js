@@ -1,6 +1,7 @@
 import { h, button, go, tab, tabBar, refreshView } from './dom.js';
 import * as store from './store.js';
-import { dateKey, findStudentByName, doneSessions, studentsNeedingPlan, newId, sessionSummary } from './core.js';
+import { dateKey, findStudentByName, doneSessions, studentsNeedingPlan, newId, nextClassNumber, classLabel } from './core.js';
+import { nextDateText } from './classinfo.js';
 import { currentStatus, isConnected, syncNow } from './sync.js';
 import { loadDemo } from './demo.js';
 import { icon, reformer, ring } from './icons.js';
@@ -39,22 +40,24 @@ function describe(event, today) {
   const plan = store.get('plans', student.id);
   const hasPlan = plan && !plan.used && plan.rows?.length;
   const content = hasPlan ? '用排好的課表' : last ? '帶入上次內容' : '還沒有紀錄';
-  return { event, student, session, last, content, done: session?.status === 'done', inClass: session?.status === 'draft' };
+  const history = doneSessions(store.all('sessions'), student.id).filter((s) => s.date !== today);
+  const count = session?.classNo ? { no: session.classNo, size: session.packageSize } : nextClassNumber(history, student);
+  return { event, student, session, last, content, classText: classLabel(count.no, count.size), done: session?.status === 'done', inClass: session?.status === 'draft' };
 }
 
 /** The class to act on now: the one in progress, otherwise the first not yet finished. */
 function heroCard(item, span) {
-  const { event, student, last, content, inClass } = item;
+  const { event, student, last, content, classText, inClass } = item;
   const needsProfile = !student.contraindications && !student.goal;
   const open = () => go('record', { studentId: student.id, kind: event.kind });
   return h('section', { class: `hero rise ${span}` },
     h('div', { class: 'hero-top' },
       h('span', { class: 'hero-label' }, inClass ? '正在上課' : '下一堂'),
-      h('span', { class: 'hero-chip' }, kindLabel(event.kind))),
+      h('span', { class: 'hero-chip' }, kindLabel(event.kind), classText ? `・${classText}` : '')),
     h('div', { class: 'hero-main' },
       h('span', { class: 'hero-time' }, event.time),
       h('span', { class: 'hero-name' }, student.name)),
-    h('p', { class: 'hero-meta' }, content, last ? `・上次 ${shortDate(last.date)} 完成 ${sessionSummary(last).percent}%` : ''),
+    h('p', { class: 'hero-meta' }, content, last ? `・上次 ${shortDate(last.date)}` : ''),
     (student.contraindications || student.nextNotes || needsProfile) && h('div', { class: 'hero-notes' },
       student.contraindications && h('div', { class: 'hero-note is-alert' }, icon('warn'), h('span', {}, student.contraindications)),
       student.nextNotes && h('div', { class: 'hero-note' }, icon('clock'), h('span', {}, student.nextNotes)),
@@ -65,7 +68,8 @@ function heroCard(item, span) {
 }
 
 function slot(item) {
-  const { event, student, last, content, done } = item;
+  const { event, student, last, content, classText, done } = item;
+  const label = [kindLabel(event.kind), classText].filter(Boolean).join('・');
   return h('button', {
     type: 'button',
     class: `slot${done ? ' is-done' : ''}`,
@@ -76,8 +80,8 @@ function slot(item) {
   h('span', {},
     h('span', { class: 'slot-name' }, student.name),
     h('span', { class: 'slot-meta' }, done
-      ? `${kindLabel(event.kind)}・已完成`
-      : `${kindLabel(event.kind)}・${content}${last ? `・上次 ${shortDate(last.date)}` : ''}`)),
+      ? `${label}・已完成・${nextDateText(student)}`
+      : `${label}・${content}${last ? `・上次 ${shortDate(last.date)}` : ''}`)),
   icon('next', 'go'));
 }
 
