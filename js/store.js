@@ -1,6 +1,7 @@
 // Keeps every record in memory for instant reads and writes through to IndexedDB in the background.
-import { SEED_EXERCISES } from './seed.js';
+import { SEED_EXERCISES, REMOVED_SEEDS } from './seed.js';
 
+const REMOVED_IDS = new Set(REMOVED_SEEDS.map((exercise) => exercise.id));
 const DB_NAME = 'training-record';
 const COLLECTIONS = ['students', 'exercises', 'sessions', 'plans', 'events', 'options'];
 // Handout text and images stay on this device: never in memory, never synced.
@@ -51,6 +52,9 @@ export async function loadStore() {
   for (const exercise of SEED_EXERCISES) {
     if (!memory.exercises.has(exercise.id)) memory.exercises.set(exercise.id, exercise);
   }
+  for (const exercise of REMOVED_SEEDS) {
+    if (!memory.exercises.has(exercise.id)) memory.exercises.set(exercise.id, exercise);
+  }
   // Whatever is still waiting goes to disk before the page can be closed or frozen.
   window.addEventListener('pagehide', () => { flush(); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
@@ -59,7 +63,8 @@ export async function loadStore() {
 }
 
 export function all(collection) {
-  return [...memory[collection].values()].filter((r) => !r.deleted);
+  // A removed starter exercise stays gone even if this device or Drive holds an older copy of it.
+  return [...memory[collection].values()].filter((r) => !r.deleted && !(collection === 'exercises' && REMOVED_IDS.has(r.id)));
 }
 
 export function get(collection, id) {

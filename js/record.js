@@ -3,7 +3,7 @@ import { h, button, backButton, go, home, openSheet, toast, dismissActionToast }
 import * as store from './store.js';
 import {
   MAX_SETS, DEFAULT_TAGS, DEFAULT_PROPS, chooserOptions, painList, painText, painShort, setPainMap, setText, rowDetails, exerciseHistory, exerciseTrend, ASSIST_LEVELS, dateKey, newId, makeRow, makeSet,
-  doneSessions, startingRows, isBpFlagged, expectedDigits, resolveStaleDraft, swapRow, commonSprings, nextClassNumber, classLabel, moveRow,
+  doneSessions, startingRows, isBpFlagged, expectedDigits, resolveStaleDraft, swapRow, commonSprings, nextClassNumber, classLabel, moveRow, setLoad, equipmentText, BAND,
 } from './core.js';
 import { kindLabel } from './today.js';
 import { exercisePicker, rememberSwaps } from './library.js';
@@ -14,17 +14,18 @@ import { numberSheet } from './numpad.js';
 import { icon } from './icons.js';
 import { bodyMap } from './bodymap.js';
 import { trendChart } from './trend.js';
+import { dragHandle } from './sortable.js';
+import { termRing } from './charts.js';
+import { equipmentControl } from './equipment.js';
 
 const SET_NAMES = ['一', '二', '三', '四', '五'];
 const STATUS_FLAGS = [['pain', '疼痛'], ['sleep', '睡眠'], ['diet', '飲食'], ['mood', '心情']];
 const PANEL_TABS = [['set', '重量次數'], ['feel', '感受與標籤']];
-const DRAG_START = 6;
-const DRAG_EDGE = 44;
 const UNDO_LIMIT = 60;
 
-/** Classes opened before class numbers existed get theirs the first time they open. */
+/** The count runs by itself. Classes opened before it did get their number the first time they open. */
 function giveClassNumber(session, student) {
-  if (session.classNo !== undefined) return;
+  if (session.classNo) return;
   const history = doneSessions(store.all('sessions'), session.studentId).filter((s) => s.id !== session.id);
   const { no, size } = nextClassNumber(history, student);
   session.classNo = no;
@@ -39,7 +40,7 @@ export function openSession(studentId, kind) {
   const student = store.get('students', studentId);
   const existing = store.all('sessions').find((s) => s.studentId === studentId && s.date === today);
   if (existing) {
-    if (existing.classNo === undefined) {
+    if (!existing.classNo) {
       giveClassNumber(existing, student);
       store.save('sessions', existing);
     }
@@ -220,12 +221,10 @@ export function recordView({ studentId, kind }) {
   }
 
   function paintClassInfo() {
-    const unset = !session.classNo;
-    classChip.classList.toggle('is-unset', unset);
-    classChip.textContent = unset ? '設定第幾堂' : classLabel(session.classNo, session.packageSize);
-    classChip.setAttribute('aria-label', unset ? '設定今天是第幾堂' : `今天是${classLabel(session.classNo, session.packageSize)}，點一下修改`);
+    classChip.replaceChildren(termRing(session.classNo, session.packageSize, false), h('span', {}, `${session.classNo}/${session.packageSize}`));
+    classChip.setAttribute('aria-label', `今天是${classLabel(session.classNo, session.packageSize)}，點一下修正`);
     const text = nextDateText(store.get('students', studentId));
-    nextChip.textContent = text;
+    nextChip.replaceChildren(icon('today'), h('span', {}, text));
     nextChip.classList.toggle('is-unset', text.endsWith('未確認') || text.endsWith('？'));
     nextChip.setAttribute('aria-label', `${text}，點一下確認下次上課日期`);
   }
@@ -239,98 +238,6 @@ export function recordView({ studentId, kind }) {
     });
     buildGrid();
     refresh();
-  }
-
-  /** The handle follows the finger and the other rows make room, so the row always shows where it will land. */
-  function startDrag(event, startIndex, rowEl, handle) {
-    if (event.button) return;
-    const rowEls = [...tableBody.children];
-    const tops = rowEls.map((el) => el.offsetTop);
-    const pitch = rowEl.offsetHeight + 6;
-    const startY = event.clientY;
-    const startScroll = tableBody.scrollTop;
-    let lastY = startY;
-    let target = startIndex;
-    let dragging = false;
-    let frame = 0;
-
-    function place() {
-      // Kept inside the list, or the row itself would make the list longer and the edge scroll would never stop.
-      const moved = Math.min(tops.at(-1) - tops[startIndex], Math.max(tops[0] - tops[startIndex], lastY - startY + tableBody.scrollTop - startScroll));
-      rowEl.style.transform = `translateY(${moved}px)`;
-      const centre = tops[startIndex] + moved;
-      let best = startIndex;
-      tops.forEach((top, index) => { if (Math.abs(top - centre) < Math.abs(tops[best] - centre)) best = index; });
-      target = best;
-      rowEls.forEach((el, index) => {
-        if (index === startIndex) return;
-        const shift = index > startIndex && index <= target ? -pitch : index < startIndex && index >= target ? pitch : 0;
-        el.style.transform = shift ? `translateY(${shift}px)` : '';
-      });
-    }
-
-    // A long class list scrolls while the finger rests near the edge.
-    function edgeScroll() {
-      const box = tableBody.getBoundingClientRect();
-      if (lastY < box.top + DRAG_EDGE) tableBody.scrollTop -= 6;
-      else if (lastY > box.bottom - DRAG_EDGE) tableBody.scrollTop += 6;
-      place();
-    }
-
-    function move(e) {
-      lastY = e.clientY;
-      if (!dragging) {
-        if (Math.abs(lastY - startY) < DRAG_START) return;
-        dragging = true;
-        handle.dataset.dragged = 'true';
-        tableBody.classList.add('is-sorting');
-        rowEl.classList.add('is-dragging');
-        frame = setInterval(edgeScroll, 16);
-      }
-      place();
-    }
-
-    function end(e) {
-      handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', end);
-      handle.removeEventListener('pointercancel', end);
-      clearInterval(frame);
-      if (!dragging) return;
-      // The click that follows a drag must not open the sheet, but the next real tap must.
-      setTimeout(() => { delete handle.dataset.dragged; }, 80);
-      tableBody.classList.remove('is-sorting');
-      rowEl.classList.remove('is-dragging');
-      rowEls.forEach((el) => { el.style.transform = ''; });
-      if (e.type === 'pointerup') shiftRow(startIndex, target);
-    }
-
-    handle.setPointerCapture(event.pointerId);
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', end);
-    handle.addEventListener('pointercancel', end);
-  }
-
-  /** A tap on the handle gives plain up and down buttons, for when dragging is awkward. */
-  function openMoveSheet(index) {
-    let at = index;
-    const name = session.rows[index].name;
-    openSheet(`調整 ${name} 的順序`, (close) => {
-      const position = h('p', { class: 'muted', role: 'status' });
-      const up = button('往上移', () => step(-1), '');
-      const down = button('往下移', () => step(1), '');
-      const paint = () => {
-        position.textContent = `目前排第 ${at + 1} 個，共 ${session.rows.length} 個`;
-        up.disabled = at === 0;
-        down.disabled = at === session.rows.length - 1;
-      };
-      function step(direction) {
-        shiftRow(at, at + direction);
-        at += direction;
-        paint();
-      }
-      paint();
-      return h('div', { class: 'stack' }, position, h('div', { class: 'panel-actions' }, up, down), button('好了', close, 'big primary'));
-    });
   }
 
   function buildGrid() {
@@ -351,17 +258,8 @@ export function recordView({ studentId, kind }) {
       }
       cells.push({ name, cells: rowCells });
       const swap = h('button', { type: 'button', class: 'grid-swap', 'aria-label': `換掉 ${row.name}`, onclick: () => openSwap(r) }, icon('swap'));
-      const handle = h('button', {
-        type: 'button',
-        class: 'grid-handle',
-        'aria-label': `調整 ${row.name} 的順序，可以按住拖曳，或點一下用按鈕移動`,
-        onclick: () => {
-          if (handle.dataset.dragged) { delete handle.dataset.dragged; return; }
-          openMoveSheet(r);
-        },
-      }, h('span', { 'aria-hidden': 'true' }));
+      const handle = dragHandle({ name: row.name, index: r, count: session.rows.length, getRow: () => rowEl, getList: () => tableBody, onMove: shiftRow });
       const rowEl = h('div', { class: 'grid-row' }, h('div', { class: 'grid-lead' }, handle, name, swap), sets);
-      handle.addEventListener('pointerdown', (e) => startDrag(e, r, rowEl, handle));
       tableBody.append(rowEl);
     });
   }
@@ -389,7 +287,7 @@ export function recordView({ studentId, kind }) {
     cell.classList.toggle('is-changed', changed);
     cell.classList.toggle('is-next', isSelected && !set.done && mode === 'set');
     cell.classList.toggle('is-spring', row.kind === 'pilates');
-    a.textContent = row.kind === 'pilates' ? (set.spring || '—') : (set.weight || '自體');
+    a.textContent = setLoad(row, set);
     b.textContent = set.reps;
     cell.setAttribute('aria-label', `${row.name} 第${SET_NAMES[s]}組 ${a.textContent} ${b.textContent} 下${set.done ? ' 已完成' : ''}`);
   }
@@ -399,6 +297,7 @@ export function recordView({ studentId, kind }) {
     const { name } = cells[r];
     name.classList.toggle('is-selected', selected?.row === r);
     const meta = [
+      equipmentText(row),
       row.rpe ? `RPE ${row.rpe}` : '',
       painList(row).length ? `痛 ${painShort(row)}` : '',
       row.tags.length ? `${row.tags.length} 標籤` : '',
@@ -550,9 +449,7 @@ export function recordView({ studentId, kind }) {
   function setTab() {
     const row = session.rows[selected.row];
     const set = row.sets[selected.set];
-    const planText = row.kind === 'pilates'
-      ? `計畫 ${set?.planSpring || '—'} × ${set?.planReps ?? '—'}`
-      : `計畫 ${set?.planWeight || '自體'} × ${set?.planReps ?? '—'}`;
+    const planText = set ? `計畫 ${setLoad(row, set, false)} × ${set.planReps ?? '—'}` : '';
     const open = row.sets.findIndex((s) => !s.done);
     return [
       h('div', { class: 'panel-head' },
@@ -562,7 +459,16 @@ export function recordView({ studentId, kind }) {
         h('div', { class: 'row-wrap' },
           handoutButton(row.exerciseId),
           h('button', { type: 'button', class: 'btn swap-btn', onclick: () => openSwap(selected.row) }, icon('swap'), h('span', {}, '換動作')))),
-      set && (row.kind === 'pilates' ? springEditor(row, set) : stepper('重量', set.weight, 'weight', [1, 2.5], 'kg')),
+      row.kind === 'strength' && equipmentControl(row, (equipment, band) => {
+        mutate(() => {
+          row.equipment = equipment;
+          row.band = band;
+        });
+        paintName(selected.row);
+        for (let s = 0; s < MAX_SETS; s++) paintCell(selected.row, s);
+        renderPanel();
+      }),
+      set && (row.kind === 'pilates' ? springEditor(row, set) : row.equipment !== BAND && stepper('重量', set.weight, 'weight', [1, 2.5], 'kg')),
       set && stepper('次數', set.reps, 'reps', [1, 2]),
       set && !set.done && h('button', {
         type: 'button',

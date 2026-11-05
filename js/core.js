@@ -7,6 +7,10 @@ export const APPARATUS = ['Reformer', 'Cadillac', 'Chair', 'Mat', 'Arc Barrel', 
 export const ASSIST_LEVELS = ['無', '少', '中', '多'];
 export const SPRING_COLORS = ['r', 'b', 'y', 'g'];
 export const SPRING_BARS = ['l', 'm', 'h'];
+export const EQUIPMENT = ['啞鈴', '槓鈴', '壺鈴', '彈力帶'];
+export const BAND = '彈力帶';
+export const BAND_COLORS = ['黃', '紅', '綠', '藍', '黑'];
+export const BODY_GROUPS = ['下肢', '胸', '背', '肩', '手臂', '核心'];
 
 export function newId(prefix = 'x') {
   const random = Math.random().toString(36).slice(2, 10);
@@ -80,6 +84,8 @@ export function makeRow(exercise, setCount = 3, base = {}) {
     exerciseId: exercise.id,
     name: exercise.name,
     kind: exercise.kind,
+    equipment: '',
+    band: '',
     sets,
     rpe: null,
     painScore: null,
@@ -106,6 +112,8 @@ export function rowsFromSession(session) {
     exerciseId: row.exerciseId,
     name: row.name,
     kind: row.kind,
+    equipment: row.equipment || '',
+    band: row.band || '',
     sets: row.sets.map((set) => makeSet(set.done
       ? { weight: set.weight, reps: set.reps, spring: set.spring }
       : { weight: set.planWeight, reps: set.planReps, spring: set.planSpring })),
@@ -139,6 +147,9 @@ export function suggestProgression(exerciseId, history, step = 2.5) {
   if (rows.length < 2) return null;
   const [latest, previous] = rows;
   if (latest.kind !== 'strength') return null;
+  // A band has no weight, and a dumbbell's weight says nothing about a barbell's.
+  if (latest.equipment === BAND || previous.equipment === BAND) return null;
+  if (latest.equipment && previous.equipment && latest.equipment !== previous.equipment) return null;
   if (!rowMetTarget(latest) || !rowMetTarget(previous)) return null;
   if ((latest.painScore || 0) >= 1) return null;
   const weight = Math.max(...latest.sets.map((s) => s.weight));
@@ -176,14 +187,14 @@ export function resolveStaleDraft(session, today) {
 export const PACKAGE_SIZES = [12, 24];
 
 /**
- * The number for a new class. history is newest first and leaves out the class being opened.
- * A number the teacher set by hand wins. With nothing known it stays empty, because a guess would count wrongly from then on.
+ * The number for a new class, counted by itself. history is newest first and leaves out the class being opened.
+ * A number the teacher corrected by hand wins, and the count carries on from it.
  */
 export function nextClassNumber(history, student) {
   if (student?.classStart?.no) return { no: student.classStart.no, size: student.classStart.size };
   const index = history.findIndex((s) => s.classNo);
   const size = student?.packageSize || history[Math.max(index, 0)]?.packageSize || PACKAGE_SIZES[0];
-  if (index === -1) return { no: null, size };
+  if (index === -1) return { no: (history.length % size) + 1, size };
   const lastSize = history[index].packageSize || size;
   const count = history[index].classNo + index + 1;
   return count > lastSize ? { no: count - lastSize, size, newTerm: true } : { no: count, size: lastSize };
@@ -232,12 +243,21 @@ export function moveRow(rows, from, to, keep = from) {
   return rows.indexOf(kept);
 }
 
-export function setLabel(row, set, useActual = true) {
+/** What the load of a set is called: a spring, a band's colour, a weight, or bodyweight. */
+export function setLoad(row, set, useActual = true) {
+  if (row.kind === 'pilates') return (useActual ? set.spring : set.planSpring) || '—';
+  if (row.equipment === BAND) return row.band ? `${row.band}帶` : '彈力帶';
   const weight = useActual ? set.weight : set.planWeight;
-  const reps = useActual ? set.reps : set.planReps;
-  const spring = useActual ? set.spring : set.planSpring;
-  const first = row.kind === 'pilates' ? (spring || '—') : (weight ? String(weight) : '自體');
-  return { first, reps: String(reps) };
+  return weight ? String(weight) : '自體';
+}
+
+/** 啞鈴, or 彈力帶 紅 */
+export function equipmentText(row) {
+  return [row.equipment, row.equipment === BAND ? row.band : ''].filter(Boolean).join(' ');
+}
+
+export function setLabel(row, set, useActual = true) {
+  return { first: setLoad(row, set, useActual), reps: String(useActual ? set.reps : set.planReps) };
 }
 
 /** Builds spring notation in the teacher's own format, such as 1r1b or 2r l. */
@@ -330,9 +350,13 @@ export function studentsNeedingPlan(events, students, plans, today) {
 /** Weight per session for the overview trend, oldest first. */
 export function exerciseTrend(exerciseId, history, limit = 8) {
   const points = [];
+  let equipment = '';
   for (const session of history) {
     const row = session.rows.find((r) => r.exerciseId === exerciseId);
-    if (!row) continue;
+    if (!row || row.equipment === BAND) continue;
+    // One line follows one kind of equipment: the most recent one. Classes with none noted still count.
+    if (equipment && row.equipment && row.equipment !== equipment) continue;
+    equipment = equipment || row.equipment || '';
     const done = row.sets.filter((s) => s.done);
     if (done.length) points.push({ date: session.date, weight: Math.max(...done.map((s) => s.weight)), reps: Math.max(...done.map((s) => s.reps)) });
     if (points.length === limit) break;
@@ -393,14 +417,14 @@ export function painShort(row) {
 }
 
 export function setText(row, set) {
-  const load = row.kind === 'pilates' ? (set.spring || '—') : (set.weight ? `${set.weight}` : '自體');
-  return `${load}×${set.reps}`;
+  return `${setLoad(row, set)}×${set.reps}`;
 }
 
 /** Everything noted about one exercise in one class, for history lists and the PDF. */
 export function rowDetails(row) {
   const pain = painText(row);
   return [
+    equipmentText(row),
     row.rpe ? `RPE ${row.rpe}` : '',
     row.replacedFrom ? `由 ${row.replacedFrom.name} 換來` : '',
     pain ? `痛 ${pain}` : '',
@@ -485,6 +509,8 @@ export function swapRow(rows, index, exercise, history = []) {
     spring: pastSet?.spring ?? '',
     reps: pastSet?.reps ?? left[0]?.reps ?? row.sets[0]?.reps ?? 10,
   });
+  fresh.equipment = past?.equipment || '';
+  fresh.band = past?.band || '';
   fresh.replacedFrom = { id: row.exerciseId, name: row.name };
   if (!done) {
     rows.splice(index, 1, fresh);
@@ -511,4 +537,141 @@ export function commonSprings(sessions, limit = 6) {
     }
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([spring]) => spring);
+}
+
+/** How wide text looks: a Latin letter or digit takes about half a Chinese character. */
+function textWidth(text) {
+  return [...text].reduce((sum, char) => sum + (char.charCodeAt(0) < 128 ? 0.5 : 1), 0);
+}
+
+/**
+ * Splits free text for a card: a short headline up front, the rest in small type.
+ * It breaks at a sentence mark when it can. A 、 only counts after a real phrase, since 第四、五節 must stay together.
+ */
+export function headline(text, limit = 10) {
+  const value = String(text || '').trim();
+  if (!value) return { head: '', rest: '' };
+  const tidy = (rest) => rest.replace(/^[，。、,;；\s]+/, '');
+  const sentence = value.search(/[，。,;；\n]/);
+  const first = sentence === -1 ? value : value.slice(0, sentence);
+  if (textWidth(first) <= limit) return { head: first, rest: tidy(value.slice(first.length)) };
+  const pause = first.indexOf('、');
+  if (pause >= 5 && textWidth(first.slice(0, pause)) <= limit) return { head: first.slice(0, pause), rest: tidy(value.slice(pause)) };
+  let end = 0;
+  while (textWidth(value.slice(0, end + 1)) <= limit) end += 1;
+  return { head: `${value.slice(0, end)}…`, rest: value.slice(end) };
+}
+
+/** Every exercise the student has really done, by body part or apparatus. */
+export function learnedSummary(history, library, find = () => null) {
+  const learned = new Map();
+  for (const session of history) {
+    for (const row of session.rows) {
+      if (learned.has(row.exerciseId) || !row.sets.some((s) => s.done)) continue;
+      learned.set(row.exerciseId, { name: row.name, kind: row.kind, group: find(row.exerciseId)?.group || '其他' });
+    }
+  }
+  const forKind = (kind) => {
+    const mine = [...learned.values()].filter((item) => item.kind === kind);
+    const totals = new Map();
+    for (const item of library) {
+      if (item.kind === kind) totals.set(item.group, (totals.get(item.group) || 0) + 1);
+    }
+    const names = kind === 'strength' ? [...BODY_GROUPS] : [];
+    for (const item of mine) if (!names.includes(item.group)) names.push(item.group);
+    const groups = names.map((group) => {
+      const items = mine.filter((item) => item.group === group);
+      return { group, learned: items.length, total: Math.max(totals.get(group) || 0, items.length), names: items.map((item) => item.name) };
+    });
+    if (kind === 'pilates') groups.sort((a, b) => b.learned - a.learned);
+    return { count: mine.length, groups };
+  };
+  return { strength: forKind('strength'), pilates: forKind('pilates') };
+}
+
+/** Recent Pilates quality and how much help was needed, for the learning card. */
+export function pilatesLevel(history, limit = 5) {
+  const rows = history.slice(0, limit).flatMap((session) => session.rows.filter((row) => row.kind === 'pilates'));
+  const qualities = rows.map((row) => row.quality).filter(Boolean);
+  const counts = new Map();
+  for (const row of rows) if (row.assist) counts.set(row.assist, (counts.get(row.assist) || 0) + 1);
+  const assist = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+  return {
+    quality: qualities.length ? Math.round((qualities.reduce((a, b) => a + b, 0) / qualities.length) * 10) / 10 : null,
+    assist,
+  };
+}
+
+/** The exercises done most, with how their weight has moved. */
+export function weightTrends(history, limit = 3) {
+  const seen = new Map();
+  for (const session of history.slice(0, 12)) {
+    for (const row of session.rows) {
+      if (row.kind !== 'strength') continue;
+      const item = seen.get(row.exerciseId) || { id: row.exerciseId, name: row.name, count: 0 };
+      item.count += 1;
+      seen.set(row.exerciseId, item);
+    }
+  }
+  return [...seen.values()]
+    .map((item) => ({ ...item, points: exerciseTrend(item.id, history).filter((point) => point.weight > 0) }))
+    .filter((item) => item.points.length >= 2)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit)
+    .map((item) => ({ id: item.id, name: item.name, points: item.points, change: Math.round((item.points.at(-1).weight - item.points[0].weight) * 100) / 100 }));
+}
+
+/** Each sore part's highest score per class, oldest first, with a zero for classes it did not hurt. */
+export function painSeries(history, limit = 8) {
+  const sessions = history.slice(0, limit).reverse();
+  const parts = new Map();
+  sessions.forEach((session, index) => {
+    for (const row of session.rows) {
+      for (const { part, score } of painList(row)) {
+        const name = part || '未標部位';
+        if (!parts.has(name)) parts.set(name, new Array(sessions.length).fill(0));
+        parts.get(name)[index] = Math.max(parts.get(name)[index], score || 0);
+      }
+    }
+  });
+  return [...parts.entries()]
+    .filter(([, scores]) => scores.some(Boolean))
+    .map(([part, scores]) => {
+      const earlier = scores.slice(0, -1).filter(Boolean);
+      const before = earlier.at(-1) ?? 0;
+      const latest = scores.at(-1);
+      return { part, scores, latest, direction: latest > before ? 'up' : latest < before ? 'down' : 'same' };
+    })
+    .sort((a, b) => b.latest - a.latest || Math.max(...b.scores) - Math.max(...a.scores));
+}
+
+/** One word for how training is going. The rules are simple on purpose, so the teacher can check them. */
+export function overallStatus(history) {
+  if (!history.length) return { tone: 'none', label: '尚無紀錄', detail: '上完第一堂就會顯示' };
+  if (history.length < 2) return { tone: 'none', label: '剛開始', detail: '再上一堂就能比較' };
+  const rising = painSeries(history).find((item) => item.direction === 'up');
+  if (rising) return { tone: 'alert', label: '需留意', detail: `${rising.part}疼痛增加` };
+  const trends = weightTrends(history, 99);
+  const heavier = trends.filter((item) => item.change > 0).length;
+  const lighter = trends.filter((item) => item.change < 0).length;
+  if (heavier > lighter) return { tone: 'up', label: '穩定進步', detail: `${heavier} 個動作加重` };
+  if (lighter > heavier) return { tone: 'flat', label: '重量下降', detail: `${lighter} 個動作減輕` };
+  const quality = (list) => {
+    const scores = list.flatMap((session) => session.rows.map((row) => row.quality)).filter(Boolean);
+    return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+  };
+  const recent = quality(history.slice(0, 3));
+  const older = quality(history.slice(3, 6));
+  if (recent !== null && older !== null && recent > older) return { tone: 'up', label: '穩定進步', detail: '動作品質提升' };
+  return { tone: 'flat', label: '維持穩定', detail: '重量和品質持平' };
+}
+
+export const BODY_COMP_DAYS = 90;
+
+/** The latest body measurements, the change since the one before, and whether the next is due (every 3 months). */
+export function bodyCompSummary(list, today) {
+  const sorted = [...(list || [])].sort((a, b) => b.date.localeCompare(a.date));
+  const [latest, previous] = sorted;
+  if (!latest) return { latest: null, previous: null, sorted, due: true };
+  return { latest, previous: previous || null, sorted, due: addDays(latest.date, BODY_COMP_DAYS) <= today };
 }

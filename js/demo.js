@@ -40,6 +40,10 @@ export function loadDemo() {
     id: 'demo_s1', name: '示範學員 A', aliases: [], demo: true, updatedAt: 1,
     goal: '能無痛爬樓梯、增加下肢肌力', contraindications: '左膝半月板術後，避免深屈膝超過 90 度',
     nextNotes: '上次分腿蹲時左膝內夾，先用輕重量確認',
+    bodyComp: [
+      { date: dayOffset(-100), weight: 63.4, fat: 28.2, muscle: 23.1 },
+      { date: dayOffset(-10), weight: 62.6, fat: 26.9, muscle: 23.8 },
+    ],
   });
   store.saveFromSync('students', {
     id: 'demo_s2', name: '示範學員 B', aliases: [], demo: true, updatedAt: 1,
@@ -51,10 +55,13 @@ export function loadDemo() {
   const squat = strength('高腳杯深蹲');
   const row1 = strength('坐姿划船');
   const split = strength('分腿蹲');
-  const press = strength('啞鈴肩推');
+  const press = strength('肩推');
   const makeStrength = (w1, w2, painScore) => {
     const fallback = { id: 'demo_ex_s', name: '深蹲', kind: 'strength' };
     const rows = [doneRow(squat || fallback, w1, 10), doneRow(row1 || fallback, w2, 12), doneRow(split || fallback, 8, 8), doneRow(press || fallback, 6, 10)];
+    rows[0].equipment = '壺鈴';
+    rows[2].equipment = '啞鈴';
+    rows[3].equipment = '啞鈴';
     if (painScore) {
       setPainMap(rows[2], { 左膝: painScore });
       rows[2].painNote = '下蹲到底時才痛';

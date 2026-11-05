@@ -1,30 +1,20 @@
-// Everything needed to understand a student in under a minute, most important first.
+// Who this student is right now, readable in three seconds. Each card shows one point; a tap gives the detail.
 import { h, button, backButton, go, back, home, openSheet, confirmSheet, toast, refreshView } from './dom.js';
 import * as store from './store.js';
-import { classNumberSheet, nextDateSheet, nextDateText } from './classinfo.js';
-import { dateKey, doneSessions, nextClassNumber, classLabel, recentPain, exerciseTrend, isBpFlagged, findStudentByName, setText, rowDetails } from './core.js';
-import { kindLabel } from './today.js';
+import { classNumberSheet, nextDateSheet } from './classinfo.js';
+import {
+  dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, recentPain, headline, learnedSummary, pilatesLevel,
+  weightTrends, painSeries, overallStatus, bodyCompSummary,
+} from './core.js';
 import { exportPdf } from './print.js';
 import { icon } from './icons.js';
 import { trendChart } from './trend.js';
+import { termRing, calendarPage, sparkline, painBars, learnedBar, qualityDots } from './charts.js';
+import { sessionTable, sessionFacts, sessionTitle } from './history.js';
 
 function shortDate(key) {
   return key.slice(5).replace('-', '/');
 }
-
-function sessionTable(session) {
-  return h('div', { class: 'stack-sm' }, session.rows.map((row) => {
-    const missed = row.sets.filter((s) => !s.done).length;
-    const details = rowDetails(row).join('・');
-    return h('div', { class: 'history-row' },
-      h('div', { class: 'history-main' },
-        h('strong', {}, row.name),
-        h('span', { class: 'history-sets' }, row.sets.map((set) => h('span', { class: set.done ? '' : 'set-missed' }, setText(row, set))))),
-      missed > 0 && h('span', { class: 'chip chip-alert' }, `${missed} 組未完成`),
-      details && h('div', { class: 'muted small' }, details));
-  }));
-}
-
 
 function editProfileSheet(student) {
   openSheet('學生資料', (close) => {
@@ -34,6 +24,8 @@ function editProfileSheet(student) {
     goal.value = student.goal || '';
     const contra = h('textarea', { class: 'input', 'aria-label': '疼痛與禁忌' });
     contra.value = student.contraindications || '';
+    const notes = h('textarea', { class: 'input', 'aria-label': '下次要注意的事' });
+    notes.value = student.nextNotes || '';
     const others = store.all('students').filter((s) => s.id !== student.id);
     const hasRecords = store.all('sessions').some((s) => s.studentId === student.id);
     return h('div', { class: 'stack' },
@@ -41,6 +33,7 @@ function editProfileSheet(student) {
       h('div', { class: 'stepper-label' }, '日曆上的其他寫法（用、分開）'), aliases,
       h('div', { class: 'stepper-label' }, '訓練目標'), goal,
       h('div', { class: 'stepper-label' }, '疼痛與禁忌'), contra,
+      h('div', { class: 'stepper-label' }, '下次要注意的事'), notes,
       button('儲存', () => {
         const nextName = name.value.trim();
         if (!nextName) { toast('姓名不可空白'); return; }
@@ -50,6 +43,7 @@ function editProfileSheet(student) {
           aliases: aliases.value.split(/[、,，]/).map((a) => a.trim()).filter(Boolean),
           goal: goal.value,
           contraindications: contra.value,
+          nextNotes: notes.value,
           isNew: false,
         });
         close();
@@ -99,30 +93,208 @@ function pdfSheet(student, history) {
     history.length > 12 && button(`全部 ${history.length} 堂`, () => { close(); exportPdf(student, history); }, 'list-item')));
 }
 
+/** A card holding one thing to read. It is a button because a tap gives the detail. */
+function card(span, title, iconName, onclick, body, className = '') {
+  return h('button', { type: 'button', class: `stat-card rise ${span} ${className}`.trim(), onclick },
+    h('span', { class: 'card-title' }, iconName && icon(iconName), h('span', {}, title)),
+    body);
+}
+
+/** A short headline from free text, with the rest in small type. A tap shows all of it. */
+function textCard(student, span, title, iconName, value, emptyText, className = '') {
+  const { head, rest } = headline(value);
+  const open = value
+    ? () => openSheet(title, (close) => h('div', { class: 'stack' },
+      h('p', { class: 'contra' }, value),
+      button('編輯資料', () => { close(); editProfileSheet(student); }, '')))
+    : () => editProfileSheet(student);
+  return card(span, title, iconName, open, value
+    ? h('span', { class: 'card-text' }, h('span', { class: 'card-head' }, head), rest && h('span', { class: 'card-rest' }, rest))
+    : h('span', { class: 'card-text' }, h('span', { class: 'card-empty' }, emptyText)), value ? className : '');
+}
+
+function termCard(studentId, todaySession, count) {
+  const note = count.newTerm ? '新的一期' : count.no === count.size ? '最後一堂' : '';
+  return h('button', {
+    type: 'button',
+    class: 'stat-card rise span-2',
+    'aria-label': `${todaySession ? '今天' : '下一堂'}是第 ${count.no} 堂，共 ${count.size} 堂，點一下修正`,
+    onclick: () => classNumberSheet(studentId, todaySession, refreshView),
+  },
+  h('span', { class: 'card-title' }, h('span', {}, todaySession ? '今天第幾堂' : '下一堂第幾堂')),
+  h('span', { class: 'term-body' }, termRing(count.no, count.size), h('span', { class: 'term-side' }, h('span', { class: 'muted' }, `共 ${count.size} 堂`), note && h('span', { class: 'small' }, note))));
+}
+
+function nextCard(student) {
+  const info = nextClassInfo(student, store.all('events'), dateKey());
+  const state = !info.date ? '點一下設定' : info.confirmed ? '已確認' : '待確認';
+  return h('button', {
+    type: 'button',
+    class: 'stat-card rise span-2',
+    'aria-label': info.date ? `下次上課 ${info.date} ${state}，點一下確認` : '下次上課還沒確定，點一下設定',
+    onclick: () => nextDateSheet(student.id, refreshView),
+  },
+  h('span', { class: 'card-title' }, h('span', {}, '下次上課')),
+  h('span', { class: 'term-body' }, calendarPage(info.date), h('span', { class: 'term-side' }, info.time && h('span', { class: 'next-time' }, info.time), h('span', { class: info.confirmed ? 'muted small' : 'card-note' }, state))));
+}
+
+function statusCard(history) {
+  const status = overallStatus(history);
+  const iconName = status.tone === 'up' ? 'up' : status.tone === 'alert' ? 'warn' : 'flat';
+  return h('section', { class: `stat-card rise span-2 status-${status.tone}` },
+    h('span', { class: 'card-title' }, h('span', {}, '整體狀態')),
+    h('span', { class: 'status-body' },
+      h('span', { class: 'status-mark' }, icon(iconName)),
+      h('span', { class: 'card-head' }, status.label),
+      h('span', { class: 'card-rest' }, status.detail)));
+}
+
+function learnedSheet(summary) {
+  openSheet('學過的動作', () => h('div', { class: 'stack' },
+    [...summary.strength.groups, ...summary.pilates.groups].filter((group) => group.learned).map((group) => h('div', { class: 'field' },
+      h('div', { class: 'stepper-label' }, `${group.group}（${group.learned}）`),
+      h('p', {}, group.names.join('、')))),
+    summary.strength.count + summary.pilates.count === 0 && h('p', { class: 'muted' }, '還沒有上課紀錄。')));
+}
+
+function learnedCard(history, span) {
+  const summary = learnedSummary(history, store.all('exercises'), (id) => store.get('exercises', id));
+  const level = pilatesLevel(history);
+  const showStrength = summary.strength.count > 0 || summary.pilates.count === 0;
+  return card(span, '學習程度', null, () => learnedSheet(summary), [
+    showStrength && h('span', { class: 'learn-block' },
+      h('span', { class: 'card-head' }, `重訓 ${summary.strength.count} 個動作`),
+      summary.strength.groups.map((group) => learnedBar(group.group, group.learned, group.total))),
+    summary.pilates.count > 0 && h('span', { class: 'learn-block' },
+      h('span', { class: 'card-head' }, `皮拉提斯 ${summary.pilates.count} 個`),
+      summary.pilates.groups.slice(0, 4).map((group) => learnedBar(group.group, group.learned, group.total)),
+      (level.quality !== null || level.assist) && h('span', { class: 'level-row' },
+        level.quality !== null && h('span', { class: 'level-item' }, h('span', { class: 'muted small' }, '品質'), qualityDots(level.quality), h('span', { class: 'small' }, level.quality)),
+        level.assist && h('span', { class: 'level-item' }, h('span', { class: 'muted small' }, '協助'), h('span', { class: 'small' }, level.assist)))),
+  ].filter(Boolean));
+}
+
+function changeText(change) {
+  if (!change) return '持平';
+  return `${change > 0 ? '+' : '−'}${Math.abs(change)} kg`;
+}
+
+function weightCard(history) {
+  const trends = weightTrends(history);
+  const all = weightTrends(history, 12);
+  return card('span-3', '重量趨勢', null, () => openSheet('重量趨勢', () => h('div', { class: 'stack' },
+    all.length ? all.map((item) => trendChart(item.name, item.points, Math.min(window.innerWidth, 620) - 48)) : h('p', { class: 'muted' }, '同一個動作上過兩堂，就會出現趨勢。')), { wide: true }),
+  trends.length
+    ? h('span', { class: 'series-list' }, trends.map((item) => h('span', { class: 'series-row' },
+      h('span', { class: 'series-name' }, item.name),
+      sparkline(item.points.map((point) => point.weight), `${item.name} 從 ${item.points[0].weight} 到 ${item.points.at(-1).weight} 公斤`),
+      h('span', { class: 'series-change' }, item.change > 0 && icon('up'), item.change < 0 && icon('down'), changeText(item.change)))))
+    : h('span', { class: 'card-empty' }, '再上一堂才有趨勢'));
+}
+
+const PAIN_WORDS = { up: '上升', down: '下降', same: '持平' };
+
+function painSheet(history) {
+  const items = recentPain(history, 12);
+  openSheet('疼痛紀錄', () => h('div', { class: 'stack-sm' },
+    items.length
+      ? items.map((p) => h('div', { class: 'history-row' }, h('strong', {}, `${shortDate(p.date)} ${p.exercise}`), h('div', {}, p.text), p.note && h('div', { class: 'muted small' }, p.note)))
+      : h('p', { class: 'muted' }, '最近沒有疼痛紀錄。')));
+}
+
+function painCard(history) {
+  const series = painSeries(history);
+  const sore = series.some((item) => item.latest > 0);
+  return card('span-3', '疼痛變化', null, () => painSheet(history),
+    series.length
+      ? h('span', { class: 'series-list' },
+        series.slice(0, 3).map((item) => h('span', { class: 'series-row' },
+          h('span', { class: 'series-name' }, item.part),
+          painBars(item.scores, `${item.part} 最近 ${item.scores.length} 堂的分數：${item.scores.join('、')}`),
+          h('span', { class: 'series-change' }, `${item.latest} 分`, h('span', { class: 'muted small' }, PAIN_WORDS[item.direction])))),
+        series.length > 3 && h('span', { class: 'muted small' }, `還有 ${series.length - 3} 個部位`))
+      : h('span', { class: 'pain-none' }, icon('check'), h('span', { class: 'card-head' }, history.length ? '沒有疼痛' : '尚無紀錄')),
+    sore ? 'is-alert' : '');
+}
+
+const BODY_FIELDS = [['weight', '體重', 'kg', 400], ['fat', '體脂', '%', 80], ['muscle', '肌肉量', 'kg', 200]];
+
+function bodySheet(student) {
+  openSheet('身體組成', (close) => {
+    const date = h('input', { class: 'input', type: 'date', max: dateKey(), 'aria-label': '量測日期' });
+    date.value = dateKey();
+    const inputs = BODY_FIELDS.map(([key, label, unit]) => [key, h('input', { class: 'input', type: 'number', inputmode: 'decimal', step: '0.1', min: '0', 'aria-label': `${label}（${unit}）` })]);
+    const { sorted } = bodyCompSummary(student.bodyComp, dateKey());
+    const saveList = (list) => store.save('students', { ...store.get('students', student.id), bodyComp: list });
+    const add = () => {
+      const entry = { date: date.value };
+      if (!entry.date || entry.date > dateKey()) { toast('請選今天或之前的日期'); return; }
+      for (const [[key, input], [, label, , max]] of inputs.map((pair, i) => [pair, BODY_FIELDS[i]])) {
+        if (input.value === '') continue;
+        const value = Number(input.value);
+        if (!(value > 0 && value <= max)) { toast(`${label}的數字不合理，請再看一次`); return; }
+        entry[key] = value;
+      }
+      if (Object.keys(entry).length === 1) { toast('至少填一個數字'); return; }
+      const others = (store.get('students', student.id).bodyComp || []).filter((item) => item.date !== entry.date);
+      saveList([...others, entry]);
+      close();
+      refreshView();
+    };
+    return h('div', { class: 'stack' },
+      h('p', { class: 'muted' }, '每 3 個月量一次。有量的才填。'),
+      h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '量測日期'), date),
+      h('div', { class: 'body-inputs' }, inputs.map(([, input], i) => h('label', { class: 'field' }, h('span', { class: 'stepper-label' }, `${BODY_FIELDS[i][1]}（${BODY_FIELDS[i][2]}）`), input))),
+      button('儲存這次量測', add, 'big primary'),
+      sorted.length > 0 && h('div', { class: 'stack-sm' },
+        h('div', { class: 'stepper-label' }, '過去量測'),
+        sorted.map((item) => h('div', { class: 'row-between option-row' },
+          h('span', {}, `${item.date.replaceAll('-', '/')}　${BODY_FIELDS.filter(([key]) => item[key]).map(([key, label, unit]) => `${label} ${item[key]}${unit}`).join('・')}`),
+          button('移除', () => {
+            const before = store.get('students', student.id).bodyComp || [];
+            saveList(before.filter((other) => other.date !== item.date));
+            close();
+            refreshView();
+            toast('已移除這次量測', { label: '復原', run: () => { saveList(before); refreshView(); } });
+          }, 'ghost danger-text')))));
+  });
+}
+
+function bodyCard(student) {
+  const { latest, previous, due } = bodyCompSummary(student.bodyComp, dateKey());
+  const delta = (key) => {
+    if (!latest?.[key] || !previous?.[key]) return '';
+    const change = Math.round((latest[key] - previous[key]) * 10) / 10;
+    return change ? `${change > 0 ? '+' : '−'}${Math.abs(change)}` : '持平';
+  };
+  return card('span-3', '身體組成', null, () => bodySheet(student),
+    latest
+      ? [
+        h('span', { class: 'body-stats' }, BODY_FIELDS.map(([key, label, unit]) => h('span', { class: 'body-stat' },
+          h('span', { class: 'muted small' }, label),
+          h('span', { class: 'body-value' }, latest[key] ?? '—', latest[key] ? h('small', {}, unit) : ''),
+          h('span', { class: 'muted small' }, delta(key) || ' ')))),
+        h('span', { class: due ? 'card-note' : 'muted small' }, due ? `${shortDate(latest.date)} 量的，該量了` : `${shortDate(latest.date)} 量測`),
+      ]
+      : h('span', { class: 'card-empty' }, '點一下新增量測'));
+}
+
 export function overviewView({ studentId }) {
   const student = store.get('students', studentId);
   const history = doneSessions(store.all('sessions'), studentId);
-  const last = history[0];
-  const pains = recentPain(history);
   const plan = store.get('plans', studentId);
   const hasPlan = plan && !plan.used && plan.rows?.length;
   const unsigned = history.filter((s) => !s.studentSignature).length;
-  const exerciseIds = last ? last.rows.filter((r) => r.kind === 'strength').map((r) => r.exerciseId) : [];
   const today = dateKey();
   const inClass = store.all('sessions').some((s) => s.studentId === studentId && s.date === today && s.status === 'draft');
   const bookedToday = store.all('events').some((e) => e.date === today && e.student && findStudentByName([student], e.student));
-  const needsProfile = !student.contraindications && !student.goal;
-  const todaySession = store.all('sessions').find((s) => s.studentId === studentId && s.date === today && s.classNo !== undefined);
+  const todaySession = store.all('sessions').find((s) => s.studentId === studentId && s.date === today && s.classNo);
   const count = todaySession ? { no: todaySession.classNo, size: todaySession.packageSize } : nextClassNumber(history.filter((s) => s.date !== today), student);
-  const classText = classLabel(count.no, count.size);
   // Whatever this student needs next is the one big button.
   const classFirst = inClass || bookedToday || hasPlan;
-  const trends = exerciseIds.map((id) => {
-    const points = exerciseTrend(id, history);
-    if (points.length < 2) return null;
-    const name = last.rows.find((r) => r.exerciseId === id).name;
-    return trendChart(name, points);
-  }).filter(Boolean);
+  const hasStrength = history.some((session) => session.rows.some((row) => row.kind === 'strength'));
+  const hasPilates = history.some((session) => session.rows.some((row) => row.kind === 'pilates'));
+  const pilatesOnly = hasPilates && !hasStrength;
 
   return h('div', { class: 'screen has-action' },
     h('header', { class: 'topbar' },
@@ -130,42 +302,18 @@ export function overviewView({ studentId }) {
       h('h1', {}, student.name),
       button('編輯資料', () => editProfileSheet(student), 'ghost')),
     h('main', { class: 'page bento' },
-      h('section', { class: `first-card rise span-4${student.contraindications || pains.length ? ' is-alert' : ''}` },
-        h('div', { class: 'card-title' }, icon('warn'), h('span', {}, '疼痛與禁忌')),
-        student.contraindications
-          ? h('p', { class: 'contra' }, student.contraindications)
-          : h('div', { class: 'row-between' }, h('p', {}, '還沒填寫'), button('現在填寫', () => editProfileSheet(student), needsProfile ? 'primary' : '')),
-        pains.length > 0 && h('ul', { class: 'plain-list' }, pains.slice(0, 5).map((p) => h('li', {},
-          `${shortDate(p.date)} ${p.exercise}：${p.text}${p.note ? `（${p.note}）` : ''}`)))),
-      h('section', { class: 'first-card rise span-2' },
-        h('div', { class: 'card-title' }, icon('clock'), h('span', {}, '下次要注意的事')),
-        student.nextNotes ? h('p', { class: 'contra' }, student.nextNotes) : h('p', { class: 'muted' }, '沒有註記')),
-      h('button', { type: 'button', class: 'class-card rise span-3', onclick: () => classNumberSheet(studentId, todaySession, refreshView) },
-        h('span', { class: 'stepper-label' }, todaySession ? '今天' : '下一堂'),
-        h('strong', {}, classText || '還沒設定'),
-        h('span', { class: 'muted' }, classText ? (count.newTerm ? '新的一期，點一下修改' : count.no === count.size ? '這期最後一堂，點一下修改' : '點一下修改') : '點一下設定第幾堂')),
-      h('button', { type: 'button', class: 'class-card rise span-3', onclick: () => nextDateSheet(studentId, refreshView) },
-        h('span', { class: 'stepper-label' }, '下次上課'),
-        h('strong', {}, nextDateText(student).replace(/^下次 ?/, '')),
-        h('span', { class: 'muted' }, '點一下確認')),
-      h('section', { class: 'first-card rise span-6' },
-        h('div', { class: 'card-title' }, icon('check'), h('span', {}, '上次上課')),
-        last ? [
-          h('div', {},
-            h('p', {}, `${last.date.replaceAll('-', '/')}・${kindLabel(last.kind)}${last.classNo ? `・${classLabel(last.classNo, last.packageSize)}` : ''}`),
-            (last.bpSys || last.hr) && h('p', { class: 'muted' },
-              last.bpSys ? `血壓 ${last.bpSys}/${last.bpDia}${isBpFlagged(last.bpSys, last.bpDia) ? ' 偏高' : ''}` : '',
-              last.bpSys && last.hr ? '・' : '',
-              last.hr ? `心跳 ${last.hr}` : '')),
-          Object.entries(last.flags || {}).some(([, v]) => v) && h('p', {}, '當天狀況：', Object.entries({ pain: '疼痛', sleep: '睡眠', diet: '飲食', mood: '心情' }).filter(([k]) => last.flags[k]).map(([, v]) => v).join('、')),
-          last.special && h('p', {}, `特殊狀況：${last.special}`),
-          last.note && h('p', {}, `備註：${last.note}`),
-          sessionTable(last),
-        ] : h('p', { class: 'muted' }, '還沒有上課紀錄')),
-      student.goal && fold('訓練目標', h('p', {}, student.goal)),
-      trends.length > 0 && history.length > 1 && fold('重量趨勢', trends),
-      history.length > 1 && fold(`過去紀錄（${history.length}）`, history.slice(1).map((session) => button(`${session.date.replaceAll('-', '/')}・${kindLabel(session.kind)}${session.classNo ? `・${classLabel(session.classNo, session.packageSize)}` : ''}`, () => {
-        openSheet(session.date.replaceAll('-', '/'), () => sessionTable(session), { wide: true });
+      textCard(student, 'span-6', '疼痛與禁忌', 'warn', student.contraindications, '還沒填寫，點一下填寫', 'is-alert'),
+      textCard(student, 'span-3', '訓練目標', null, student.goal, '還沒填寫，點一下填寫'),
+      textCard(student, 'span-3', '下次要注意', null, student.nextNotes, '沒有註記'),
+      termCard(studentId, todaySession, count),
+      nextCard(student),
+      statusCard(history),
+      learnedCard(history, pilatesOnly ? 'span-6' : 'span-3'),
+      !pilatesOnly && weightCard(history),
+      painCard(history),
+      bodyCard(student),
+      history.length > 0 && fold(`過去紀錄（${history.length}）`, history.map((session) => button(sessionTitle(session), () => {
+        openSheet(session.date.replaceAll('-', '/'), () => h('div', { class: 'stack-sm' }, sessionFacts(session), sessionTable(session)), { wide: true });
       }, 'list-item'))),
       history.length > 0 && fold('匯出 PDF', [
         unsigned > 0 && h('p', { class: 'muted' }, `有 ${unsigned} 堂還沒有學生簽名。`),

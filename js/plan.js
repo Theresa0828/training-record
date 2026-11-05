@@ -1,13 +1,15 @@
 // Plans the next class: starts from last time, then the teacher tweaks it.
 import { h, button, back, backButton, go, openSheet, toast, dismissActionToast } from './dom.js';
 import * as store from './store.js';
-import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, swapRow, commonSprings } from './core.js';
+import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, swapRow, commonSprings, moveRow, BAND } from './core.js';
 import { exercisePicker, rememberSwaps } from './library.js';
 import { handoutButton } from './handout.js';
 import { springEditor } from './spring.js';
 import { numberSheet } from './numpad.js';
 import { icon } from './icons.js';
-import { kindLabel } from './today.js';
+import { dragHandle } from './sortable.js';
+import { equipmentControl } from './equipment.js';
+import { lastClassCard } from './history.js';
 
 function loadPlan(studentId, history) {
   const saved = store.get('plans', studentId);
@@ -134,16 +136,23 @@ export function planView({ studentId }) {
   }
 
   function rowCard(row, index) {
-    const suggestion = !dismissed.has(row.id) && suggestProgression(row.exerciseId, history);
+    const suggestion = !dismissed.has(row.id) && row.equipment !== BAND && suggestProgression(row.exerciseId, history);
     const alreadyApplied = suggestion && row.sets[0]?.weight >= suggestion.to;
     const first = row.sets[0] || {};
-    return h('div', { class: 'plan-row stack-sm' },
+    const handle = dragHandle({
+      name: row.name,
+      index,
+      count: plan.rows.length,
+      getRow: () => rowEl,
+      getList: () => list,
+      onMove: (from, to) => change(() => moveRow(plan.rows, from, to)),
+    });
+    const rowEl = h('div', { class: 'plan-row stack-sm' },
       h('div', { class: 'row-between' },
-        h('strong', {}, `${index + 1}. ${row.name}`),
+        h('div', { class: 'plan-row-name' }, handle, h('strong', {}, `${index + 1}. ${row.name}`)),
         h('div', { class: 'row-wrap' },
           handoutButton(row.exerciseId),
           h('button', { type: 'button', class: 'btn swap-btn', onclick: () => swapExercise(row, index) }, icon('swap'), h('span', {}, '換動作')),
-          button('上移', () => change(() => { plan.rows.splice(index - 1, 0, plan.rows.splice(index, 1)[0]); }), 'ghost', { disabled: index === 0 }),
           button('移除', () => {
             change(() => plan.rows.splice(index, 1));
             toast(`已移除 ${row.name}`, { label: '復原', run: undoOnce });
@@ -152,18 +161,22 @@ export function planView({ studentId }) {
         h('span', {}, `連續兩次達標，建議 ${suggestion.from} → ${suggestion.to} kg`),
         button('採用', () => change(() => applySuggestion(row, suggestion)), 'primary'),
         button('不用', () => { dismissed.add(row.id); draw(); }, 'ghost')),
+      row.kind === 'strength' && equipmentControl(row, (equipment, band) => change(() => {
+        row.equipment = equipment;
+        row.band = band;
+      })),
       h('div', { class: 'plan-controls' },
-        row.kind === 'pilates'
-          ? springControl(row)
-          : h('div', { class: 'plan-control' }, h('span', { class: 'stepper-label' }, '重量'),
-            step(row, 'weight', -2.5), step(row, 'weight', -1),
-            h('button', { type: 'button', class: 'stepper-value value-tap', 'aria-label': `${row.name} 直接輸入重量`, onclick: () => typeValue(row, 'weight', '重量', 'kg') }, first.weight || '自體'),
-            step(row, 'weight', 1), step(row, 'weight', 2.5)),
+        row.kind === 'pilates' && springControl(row),
+        row.kind === 'strength' && row.equipment !== BAND && h('div', { class: 'plan-control' }, h('span', { class: 'stepper-label' }, '重量'),
+          step(row, 'weight', -2.5), step(row, 'weight', -1),
+          h('button', { type: 'button', class: 'stepper-value value-tap', 'aria-label': `${row.name} 直接輸入重量`, onclick: () => typeValue(row, 'weight', '重量', 'kg') }, first.weight || '自體'),
+          step(row, 'weight', 1), step(row, 'weight', 2.5)),
         h('div', { class: 'plan-control' }, h('span', { class: 'stepper-label' }, '次數'),
           step(row, 'reps', -1),
           h('button', { type: 'button', class: 'stepper-value value-tap', 'aria-label': `${row.name} 直接輸入次數`, onclick: () => typeValue(row, 'reps', '次數', '') }, first.reps ?? '—'),
           step(row, 'reps', 1)),
         setsControl(row)));
+    return rowEl;
   }
 
   function draw() {
@@ -186,17 +199,19 @@ export function planView({ studentId }) {
           toast('課表已儲存，下次上課會自動帶入');
           back();
         }, 'primary'))),
-    h('main', { class: 'page stack' },
-      h('section', { class: 'callout stack-sm' },
-        student.contraindications && h('p', { class: 'contra' }, `禁忌：${student.contraindications}`),
-        student.nextNotes && h('p', {}, `注意：${student.nextNotes}`),
+    h('main', { class: 'page plan-layout' },
+      h('div', { class: 'plan-side stack' },
+        (student.contraindications || student.nextNotes) && h('section', { class: 'callout stack-sm' },
+          student.contraindications && h('p', { class: 'contra' }, `禁忌：${student.contraindications}`),
+          student.nextNotes && h('p', {}, `注意：${student.nextNotes}`)),
         last
-          ? h('p', { class: 'muted' }, `已複製上次（${last.date.replaceAll('-', '/')}・${kindLabel(last.kind)}）的實際內容`)
+          ? lastClassCard(last)
           : h('p', { class: 'muted' }, '這位學生還沒有紀錄'),
         button('看完整總覽', () => go('overview', { studentId }), 'ghost')),
-      list,
-      button('＋ 加入動作', () => openSheet('加入動作', (close) => exercisePicker(last?.kind || 'strength', (exercise) => {
-        close();
-        change(() => plan.rows.push(makeRow(exercise, 3)));
-      }), { wide: true }), 'add-row')));
+      h('div', { class: 'plan-main stack' },
+        list,
+        button('＋ 加入動作', () => openSheet('加入動作', (close) => exercisePicker(last?.kind || 'strength', (exercise) => {
+          close();
+          change(() => plan.rows.push(makeRow(exercise, 3)));
+        }), { wide: true }), 'add-row'))));
 }

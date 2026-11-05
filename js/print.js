@@ -1,7 +1,7 @@
 // Lays sessions out like the MRE005 paper form: three classes a page, eight rows, five sets.
 import { toast } from './dom.js';
 import * as store from './store.js';
-import { MAX_SETS, rowDetails } from './core.js';
+import { MAX_SETS, rowDetails, setLoad } from './core.js';
 import { call, isConnected } from './sync.js';
 
 const PER_PAGE = 3;
@@ -24,7 +24,7 @@ function rowsHtml(session) {
     for (let s = 0; s < MAX_SETS; s++) {
       const set = row?.sets[s];
       const shown = set && set.done;
-      const first = shown ? (row.kind === 'pilates' ? set.spring : (set.weight || '自體')) : '';
+      const first = shown ? setLoad(row, set) : '';
       html += `<td class="sub">${escapeHtml(first)}</td><td class="sub">${shown ? escapeHtml(set.reps) : ''}</td>`;
     }
     if (i === 0) html += `<td class="note" rowspan="${count}">${noteHtml(session)}</td>`;

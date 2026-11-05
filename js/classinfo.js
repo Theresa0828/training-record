@@ -1,20 +1,23 @@
 // Which class of the term this is, and when the student comes next. Used in class, on the overview and at the end of class.
 import { h, button, openSheet, toast } from './dom.js';
 import * as store from './store.js';
-import { PACKAGE_SIZES, addDays, classLabel, dateKey, dateWithWeek, nextClassInfo, nextBooking } from './core.js';
+import { PACKAGE_SIZES, addDays, classLabel, dateKey, dateWithWeek, doneSessions, nextClassInfo, nextBooking, nextClassNumber } from './core.js';
+import { termRing } from './charts.js';
 
 /**
- * Picks the class number. With a session it corrects that class; without one it sets what the next class will be.
- * One tap on a number finishes, because this is done between other things.
+ * The count runs by itself; this is only for correcting it. With a session it corrects that class,
+ * without one it sets what the next class will be. Each tap saves at once.
  */
 export function classNumberSheet(studentId, session, onDone) {
-  openSheet(session ? '今天是第幾堂' : '下一堂是第幾堂', (close) => {
+  openSheet(session ? '修正今天是第幾堂' : '修正下一堂是第幾堂', (close) => {
     const student = store.get('students', studentId);
-    let size = session?.packageSize || student.packageSize || student.classStart?.size || PACKAGE_SIZES[0];
-    const current = session?.classNo ?? student.classStart?.no ?? null;
+    const history = doneSessions(store.all('sessions'), studentId).filter((s) => s.id !== session?.id);
+    const counted = nextClassNumber(history, student);
+    let size = session?.packageSize || student.packageSize || counted.size;
+    let no = session?.classNo || counted.no;
     const area = h('div', { class: 'stack' });
 
-    function pick(no) {
+    function save() {
       const latest = store.get('students', studentId);
       if (session) {
         session.classNo = no;
@@ -24,22 +27,25 @@ export function classNumberSheet(studentId, session, onDone) {
       } else {
         store.save('students', { ...latest, packageSize: size, classStart: { no, size } });
       }
-      close();
       onDone?.();
     }
 
     function draw() {
-      const numbers = Array.from({ length: size }, (_, i) => i + 1);
       area.replaceChildren(
+        h('div', { class: 'class-fix' },
+          h('button', { type: 'button', class: 'btn step class-step', disabled: no <= 1, 'aria-label': '少一堂', onclick: () => { no -= 1; save(); draw(); } }, '−'),
+          termRing(no, size),
+          h('button', { type: 'button', class: 'btn step class-step', disabled: no >= size, 'aria-label': '多一堂', onclick: () => { no += 1; save(); draw(); } }, '+')),
+        h('p', { class: 'muted class-fix-text', role: 'status' }, classLabel(no, size)),
         h('div', { class: 'field' },
           h('div', { class: 'stepper-label' }, '這期共幾堂'),
-          h('div', { class: 'segmented' }, PACKAGE_SIZES.map((option) => button(`${option} 堂`, () => { size = option; draw(); }, 'chip-btn', { 'aria-pressed': option === size ? 'true' : 'false' })))),
-        h('div', { class: 'field' },
-          h('div', { class: 'stepper-label' }, session ? '點今天是第幾堂' : '點下一堂是第幾堂'),
-          h('div', { class: 'chips class-numbers' }, numbers.map((no) => button(String(no), () => pick(no), 'chip-btn', {
-            'aria-pressed': no === current ? 'true' : 'false',
-            'aria-label': classLabel(no, size),
-          })))));
+          h('div', { class: 'segmented' }, PACKAGE_SIZES.map((option) => button(`${option} 堂`, () => {
+            size = option;
+            no = Math.min(no, size);
+            save();
+            draw();
+          }, 'chip-btn', { 'aria-pressed': option === size ? 'true' : 'false' })))),
+        button('好了', close, 'big primary'));
     }
 
     draw();

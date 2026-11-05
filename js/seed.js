@@ -45,6 +45,10 @@ const ALTERNATIVES = {
   捲腹: ['死蟲式', '棒式'],
 };
 
+// The teacher removed these on 2026-11-05: most were the same movement on other equipment, which is now chosen per exercise.
+// They stay in the list above because an exercise's id comes from its position, and old records point at those ids.
+const REMOVED = new Set(['腿伸屈', '腿彎舉', '錘式彎舉', '肩內旋', '肩外旋', '啞鈴肩推', '背伸展', '單臂啞鈴划船', '輔助引體向上', '側棒式', '捲腹', '棒式', '懸吊抬腿', '上斜啞鈴臥推', '夾胸機', '啞鈴臥推', '繩索夾胸']);
+
 // English names people also use, so a search finds them either way.
 const ALIASES = {
   深蹲: ['Squat'], 硬舉: ['Deadlift'], 腿推: ['Leg Press'], 腿伸屈: ['Leg Extension'], 腿彎舉: ['Leg Curl'], 臀推: ['Hip Thrust'],
@@ -53,12 +57,16 @@ const ALIASES = {
 
 const idOf = new Map(STRENGTH.flatMap(([group, names]) => names.map((name, index) => [name, `seed_${group}_${index}`])));
 
-export const SEED_EXERCISES = STRENGTH.flatMap(([group, names]) => names.map((name) => ({
+const ALL_SEEDS = STRENGTH.flatMap(([group, names]) => names.map((name) => ({
   id: idOf.get(name),
   name,
   group,
   kind: 'strength',
   aliases: ALIASES[name] || [],
-  alternatives: (ALTERNATIVES[name] || []).map((other) => idOf.get(other)).filter(Boolean),
+  alternatives: (ALTERNATIVES[name] || []).filter((other) => !REMOVED.has(other)).map((other) => idOf.get(other)).filter(Boolean),
   updatedAt: 0,
 })));
+
+export const SEED_EXERCISES = ALL_SEEDS.filter((exercise) => !REMOVED.has(exercise.name));
+/** Kept only so old records can still find their body part. Never offered in a list. */
+export const REMOVED_SEEDS = ALL_SEEDS.filter((exercise) => REMOVED.has(exercise.name)).map((exercise) => ({ ...exercise, deleted: true }));
