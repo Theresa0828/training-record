@@ -1,5 +1,5 @@
 // The in-class screen. A tap changes memory, updates only what it touched, and saves in the background.
-import { h, button, backButton, go, home, openSheet, toast, dismissActionToast } from './dom.js';
+import { h, button, holdButton, backButton, go, home, openSheet, toast, dismissActionToast } from './dom.js';
 import * as store from './store.js';
 import {
   MAX_SETS, DEFAULT_TAGS, DEFAULT_PROPS, chooserOptions, painList, painText, painShort, setPainMap, setText, rowDetails, exerciseHistory, exerciseTrend, ASSIST_LEVELS, dateKey, newId, makeRow, makeSet,
@@ -490,7 +490,7 @@ export function recordView({ studentId, kind }) {
           mutate(() => { set.done = false; });
           refresh();
         }, ''),
-        button('移除動作', removeRow, 'ghost danger-text')),
+        holdButton('移除動作', removeRow, 'ghost danger-text')),
     ];
   }
 
@@ -660,14 +660,16 @@ export function recordView({ studentId, kind }) {
       const picked = h('div', { class: 'body-picked' });
       const keypad = h('div', {});
       const remove = (part) => {
+        const score = scores[part];
         delete scores[part];
         active = Object.keys(scores).at(-1) || null;
         save();
         draw();
+        toast(`已移除 ${part}`, { label: '復原', run: () => { scores[part] = score; active = part; save(); draw(); } });
       };
-      // The first tap marks a part, a tap on another marked part moves to it, a tap on the current one takes it off.
+      // The first tap marks a part and a tap on another marked part moves to it. Taking one off needs the held button.
       const tapPart = (part) => {
-        if (part === active) { remove(part); return; }
+        if (part === active) return;
         if (!(part in scores)) {
           scores[part] = null;
           save();
@@ -689,7 +691,7 @@ export function recordView({ studentId, kind }) {
         keypad.replaceChildren(active ? h('div', { class: 'field' },
           h('div', { class: 'row-between' },
             h('div', { class: 'pain-target' }, `${active} 的疼痛分數`),
-            button('移除這個部位', () => remove(active), 'ghost danger-text')),
+            holdButton('移除這個部位', () => remove(active), 'ghost danger-text')),
           h('div', { class: 'chips chips-11' }, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((value) => button(String(value), () => {
             scores[active] = value;
             save();
@@ -745,7 +747,7 @@ export function recordView({ studentId, kind }) {
           h('div', { class: 'stepper-label' }, `你新增的${label}`),
           own.map((option) => h('div', { class: 'row-between option-row' },
             h('span', {}, option.name),
-            button('移除', () => {
+            holdButton('移除', () => {
               store.save('options', { ...option, deleted: true });
               close();
               refresh();

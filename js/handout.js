@@ -139,11 +139,11 @@ export function importHandoutSheet() {
         }
         await store.saveHandout(data);
         const plan = planHandoutImport(data, store.all('exercises'), (id) => store.get('exercises', id));
-        for (const exercise of [...plan.add, ...plan.link]) store.save('exercises', exercise);
+        for (const exercise of [...plan.add, ...plan.link, ...plan.update]) store.save('exercises', exercise);
         await store.flush();
         refreshView();
         close();
-        toast(`講義已匯入：新增 ${plan.add.length} 個動作，${data.exercises.length} 個動作可看講義`);
+        toast(`講義已匯入：新增 ${plan.add.length} 個動作${plan.update.length ? `，更新 ${plan.update.length} 個分類` : ''}，${data.exercises.length} 個動作可看講義`);
       } catch (error) {
         status.textContent = importMessage(error);
         choose.disabled = false;

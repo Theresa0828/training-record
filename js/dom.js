@@ -27,6 +27,46 @@ export function button(label, onclick, className = '', props = {}) {
   return h('button', { type: 'button', class: `btn ${className}`, onclick, ...props }, label);
 }
 
+export const HOLD_MS = 1000;
+
+/**
+ * A button that only acts after being held for one second, for everything that removes or deletes.
+ * A short tap fills nothing and says how to use it, so a stray finger never deletes.
+ */
+export function holdButton(label, onHold, className = '', props = {}) {
+  const fill = h('span', { class: 'hold-fill', 'aria-hidden': 'true' });
+  const el = h('button', { type: 'button', class: `btn hold ${className}`.trim(), 'aria-label': `${label}，按住 1 秒`, ...props },
+    fill, h('span', { class: 'hold-label' }, label, h('small', {}, '按住 1 秒')));
+  let timer = null;
+  let started = 0;
+  const begin = () => {
+    if (timer) return;
+    started = Date.now();
+    el.classList.add('is-holding');
+    timer = setTimeout(() => {
+      timer = null;
+      el.classList.remove('is-holding');
+      navigator.vibrate?.(15);
+      onHold();
+    }, HOLD_MS);
+  };
+  const end = (hint) => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = null;
+    el.classList.remove('is-holding');
+    if (hint && Date.now() - started < HOLD_MS) toast(`要按住 1 秒才會${label.includes('刪除') ? '刪除' : '移除'}`);
+  };
+  el.addEventListener('pointerdown', (e) => { if (e.button === 0) begin(); });
+  el.addEventListener('pointerup', () => end(true));
+  el.addEventListener('pointerleave', () => end(false));
+  el.addEventListener('pointercancel', () => end(false));
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+  el.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && !e.repeat) { e.preventDefault(); begin(); } });
+  el.addEventListener('keyup', (e) => { if (e.key === 'Enter' || e.key === ' ') end(true); });
+  return el;
+}
+
 const views = new Map();
 const history = [];
 let current = null;
@@ -137,7 +177,7 @@ export function confirmSheet(title, message, confirmLabel, onConfirm) {
     h('p', {}, message),
     h('div', { class: 'row-between' },
       button('取消', close, ''),
-      button(confirmLabel, () => { close(); onConfirm(); }, 'danger'))));
+      holdButton(confirmLabel, () => { close(); onConfirm(); }, 'danger'))));
 }
 
 /**

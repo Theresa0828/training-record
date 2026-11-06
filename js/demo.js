@@ -3,10 +3,10 @@ import * as store from './store.js';
 import { dateKey, makeRow, setPainMap } from './core.js';
 
 const DEMO_PILATES = [
-  { id: 'demo_ex_1', name: 'Footwork', group: 'Reformer', kind: 'pilates' },
-  { id: 'demo_ex_2', name: 'Hundred', group: 'Reformer', kind: 'pilates' },
-  { id: 'demo_ex_3', name: 'Elephant', group: 'Reformer', kind: 'pilates' },
-  { id: 'demo_ex_4', name: 'Swan', group: 'Arc Barrel', kind: 'pilates' },
+  { id: 'demo_ex_1', name: 'Footwork', group: 'Reformer', kind: 'pilates', tags: { region: '下肢', posture: '仰躺', focus: ['穩定', '肌力'], level: 1, muscles: ['股四頭肌', '臀肌'], family: '腳踩踏' } },
+  { id: 'demo_ex_2', name: 'Hundred', group: 'Reformer', kind: 'pilates', tags: { region: '核心', posture: '仰躺', focus: ['穩定', '協調'], level: 2, muscles: ['腹肌'], family: '捲腹' } },
+  { id: 'demo_ex_3', name: 'Elephant', group: 'Reformer', kind: 'pilates', tags: { region: '全身', posture: '站姿', focus: ['活動度', '穩定'], level: 1, muscles: ['腹肌', '腿後肌'], family: '推拉車台' } },
+  { id: 'demo_ex_4', name: 'Swan', group: 'Arc Barrel', kind: 'pilates', tags: { region: '脊椎', posture: '俯趴', focus: ['活動度', '肌力'], level: 2, muscles: ['背伸肌'], family: '伸展脊椎' } },
 ];
 
 function strength(name) {

@@ -1,6 +1,6 @@
 // Which equipment a strength exercise used. The same movement on other equipment is one exercise, with this set per class.
 // Each piece has a flat picture, because 啞鈴, 壺鈴 and 槓鈴 look alike as words.
-import { h, button, openSheet, toast } from './dom.js';
+import { h, button, holdButton, openSheet, toast } from './dom.js';
 import * as store from './store.js';
 import { EQUIPMENT, BAND, BAND_COLORS, chooserOptions, newId } from './core.js';
 
@@ -72,7 +72,7 @@ function addEquipmentSheet(onAdded) {
         h('div', { class: 'stepper-label' }, '你新增的器材'),
         own.map((option) => h('div', { class: 'row-between option-row' },
           h('span', { class: 'row-wrap' }, equipmentIcon(option.name), option.name),
-          button('移除', () => {
+          holdButton('移除', () => {
             store.save('options', { ...option, deleted: true });
             close();
             onAdded(null);

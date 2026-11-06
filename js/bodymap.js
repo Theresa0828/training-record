@@ -72,18 +72,23 @@ function centerOf(shape, mirror) {
   return [mirror ? 200 - x : x, y];
 }
 
-function figure({ label, near, far, center, sides, eyes }, onToggle) {
-  const root = svg('svg', { viewBox: VIEW_BOX, class: 'body-figure', role: 'group', 'aria-label': label });
+function figure({ label, near, far, center, sides, eyes }, onToggle, readOnly) {
+  const root = svg('svg', readOnly ? { viewBox: VIEW_BOX, class: 'body-figure', 'aria-hidden': 'true' } : { viewBox: VIEW_BOX, class: 'body-figure', role: 'group', 'aria-label': label });
   root.append(svg('text', { x: 14, y: 18, class: 'body-side' }, near), svg('text', { x: 186, y: 18, 'text-anchor': 'end', class: 'body-side' }, far));
   const part = (name, shape, mirror) => {
-    const path = svg('path', { d: shape === 'head' ? HEAD : rounded(SHAPES[shape]), class: 'body-part', 'data-tap': '', 'data-part': name, role: 'button', tabindex: 0, 'aria-label': name });
+    const d = shape === 'head' ? HEAD : rounded(SHAPES[shape]);
+    const path = readOnly
+      ? svg('path', { d, class: 'body-part', 'data-part': name })
+      : svg('path', { d, class: 'body-part', 'data-tap': '', 'data-part': name, role: 'button', tabindex: 0, 'aria-label': name });
     if (mirror) path.setAttribute('transform', 'matrix(-1 0 0 1 200 0)');
-    path.addEventListener('click', () => onToggle(name));
-    path.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      e.preventDefault();
-      onToggle(name);
-    });
+    if (!readOnly) {
+      path.addEventListener('click', () => onToggle(name));
+      path.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        onToggle(name);
+      });
+    }
     const [x, y] = centerOf(shape, mirror);
     scores.push(svg('text', { x, y: y + 5, 'text-anchor': 'middle', class: 'body-score', 'data-score': name }));
     return path;
@@ -97,18 +102,19 @@ function figure({ label, near, far, center, sides, eyes }, onToggle) {
 }
 
 /** Returns the two figures. update(scores, active) lights each marked part and writes its score on it; a joint shows on both. */
-export function bodyMap(onTap) {
+export function bodyMap(onTap, { readOnly = false } = {}) {
   const figures = FIGURES.map((data) => {
     const wrap = document.createElement('div');
     wrap.className = 'body-view';
     const caption = document.createElement('div');
     caption.className = 'body-caption';
     caption.textContent = data.label;
-    wrap.append(caption, figure(data, onTap));
+    wrap.append(caption, figure(data, onTap, readOnly));
     return wrap;
   });
   const el = document.createElement('div');
   el.className = 'body-map';
+  if (readOnly) el.setAttribute('aria-hidden', 'true');
   el.append(...figures);
   const parts = [...el.querySelectorAll('.body-part')];
   const labels = [...el.querySelectorAll('.body-score')];
@@ -118,6 +124,7 @@ export function bodyMap(onTap) {
       const on = name in scores;
       path.classList.toggle('is-on', on);
       path.classList.toggle('is-active', name === active);
+      if (readOnly) continue;
       path.setAttribute('aria-pressed', on ? 'true' : 'false');
       path.setAttribute('aria-label', on && scores[name] !== null ? `${name} ${scores[name]} 分` : name);
     }

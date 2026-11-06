@@ -1,6 +1,9 @@
-import { h, button, tabBar, openSheet, toast, refreshView } from './dom.js';
+import { h, button, holdButton, tabBar, openSheet, toast, refreshView } from './dom.js';
 import * as store from './store.js';
-import { newId, APPARATUS, usageCounts, searchExercises, commonExercises, swapOptions, learnAlternative } from './core.js';
+import {
+  newId, APPARATUS, usageCounts, searchExercises, commonExercises, swapOptions, learnAlternative,
+  PILATES_REGIONS, PILATES_POSTURES, PILATES_FOCUS, PILATES_LEVELS, cleanPilatesTags, pilatesTagText, filterPilates, pilatesSteps,
+} from './core.js';
 import { handoutSheet, importHandoutSheet } from './handout.js';
 
 function byKind(kind) {
@@ -16,6 +19,45 @@ function groupsOf(items, kind) {
   const seen = new Set(items.map((item) => item.group || '其他'));
   if (kind === 'pilates') for (const apparatus of APPARATUS) seen.add(apparatus);
   return [...seen];
+}
+
+/** A name with its classification underneath, so similar Pilates names can be told apart. */
+function exerciseLabel(exercise, prefix = '') {
+  const tags = exercise.kind === 'pilates' ? pilatesTagText(exercise.tags) : '';
+  return [h('span', { class: 'pick-name' }, `${prefix}${exercise.name}`), tags && h('small', { class: 'pick-tags' }, tags)];
+}
+
+const FILTER_ROWS = [['region', '部位', PILATES_REGIONS], ['posture', '姿勢', PILATES_POSTURES], ['focus', '重點', PILATES_FOCUS], ['level', '程度', PILATES_LEVELS]];
+
+function emptyFilters() {
+  return { region: '', posture: '', focus: '', level: '', apparatus: '' };
+}
+
+/**
+ * Rows of filters for Pilates: 部位, 姿勢, 重點, 程度 and, once there is more than one, 器材.
+ * One tap per row narrows the list, so a suitable exercise is a few taps away. Only values in use are offered.
+ */
+function pilatesFinder(items, filters, onChange, renderList) {
+  const has = (key, value) => items.some((e) => (key === 'focus' ? (e.tags?.focus || []).includes(value) : e.tags?.[key] === value));
+  const valueOf = (key, label) => (key === 'level' ? PILATES_LEVELS.indexOf(label) + 1 : label);
+  const rows = FILTER_ROWS
+    .map(([key, label, values]) => [key, label, values.filter((value) => has(key, valueOf(key, value)))])
+    .filter(([, , values]) => values.length);
+  const apparatus = [...new Set(items.map((e) => e.group).filter(Boolean))];
+  if (apparatus.length > 1) rows.push(['apparatus', '器材', apparatus]);
+  const active = Object.values(filters).some(Boolean);
+  const matches = filterPilates(items, filters);
+  return h('section', { class: 'finder' },
+    rows.map(([key, label, values]) => h('div', { class: 'finder-row', role: 'group', 'aria-label': label },
+      h('span', { class: 'finder-label' }, label),
+      h('div', { class: 'chips' }, values.map((value) => {
+        const wanted = valueOf(key, value);
+        return button(value, () => { filters[key] = filters[key] === wanted ? '' : wanted; onChange(); }, 'chip-btn', { 'aria-pressed': filters[key] === wanted ? 'true' : 'false' });
+      })))),
+    active && h('div', { class: 'row-between finder-count' },
+      h('strong', {}, `符合 ${matches.length} 個`),
+      button('清除條件', () => { Object.assign(filters, emptyFilters()); onChange(); }, 'ghost')),
+    active && (matches.length ? renderList(matches) : h('p', { class: 'muted' }, '沒有符合的動作，少選一個條件試試。')));
 }
 
 /** Adds one exercise without leaving the class or the plan. */
@@ -47,7 +89,7 @@ function alternativesSheet(exercise, onChange) {
     const draw = () => {
       const latest = store.get('exercises', exercise.id) || exercise;
       const chosen = latest.alternatives || [];
-      list.replaceChildren(...byKind(exercise.kind).filter((item) => item.id !== exercise.id).map((item) => button(item.name, () => {
+      list.replaceChildren(...byKind(exercise.kind).filter((item) => item.id !== exercise.id).map((item) => button(exerciseLabel(item), () => {
         const next = chosen.includes(item.id) ? chosen.filter((id) => id !== item.id) : [...chosen, item.id];
         store.save('exercises', { ...latest, alternatives: next });
         draw();
@@ -77,6 +119,7 @@ export function exercisePicker(defaultKind, onPick, { current = null } = {}) {
   let query = '';
   let group = null;
   let managing = false;
+  const filters = emptyFilters();
   const results = h('div', { class: 'picker-results' });
   const search = h('input', { class: 'input', placeholder: '搜尋動作，中英文都可以', 'aria-label': '搜尋動作' });
   const tabs = h('div', { class: 'segmented' });
@@ -95,9 +138,9 @@ export function exercisePicker(defaultKind, onPick, { current = null } = {}) {
 
   function pick(exercise) {
     if (managing) {
-      return button(`${exercise.pinned ? '★' : '☆'} ${exercise.name}`, () => togglePin(exercise), 'pick', { 'aria-pressed': exercise.pinned ? 'true' : 'false' });
+      return button(exerciseLabel(exercise, exercise.pinned ? '★ ' : '☆ '), () => togglePin(exercise), 'pick', { 'aria-pressed': exercise.pinned ? 'true' : 'false' });
     }
-    return button(exercise.name, () => onPick(exercise), 'pick');
+    return button(exerciseLabel(exercise), () => onPick(exercise), 'pick');
   }
 
   const block = (title, list, extra) => h('section', { class: 'pick-block' },
@@ -120,18 +163,36 @@ export function exercisePicker(defaultKind, onPick, { current = null } = {}) {
     } else {
       let offered = [];
       if (current && current.kind === kind && !managing) {
-        const { sameGroup, list } = swapOptions(store.get('exercises', current.id) || current, items, usage);
-        offered = list;
-        if (list.length) {
-          parts.push(block(sameGroup ? `同${kind === 'pilates' ? '器材' : '部位'}的動作` : '替代動作', list,
+        const latest = store.get('exercises', current.id) || current;
+        // A classified Pilates exercise is offered easier, same-level and harder ones instead of its whole apparatus.
+        const steps = kind === 'pilates' ? pilatesSteps(latest, items) : null;
+        const stepped = steps && steps.easier.length + steps.same.length + steps.harder.length > 0;
+        const { sameGroup, list } = swapOptions(latest, items, usage);
+        offered = sameGroup && stepped ? [] : list;
+        if (offered.length) {
+          parts.push(block(sameGroup ? `同${kind === 'pilates' ? '器材' : '部位'}的動作` : '替代動作', offered,
             store.get('exercises', current.id) && button('編輯', () => alternativesSheet(store.get('exercises', current.id), draw), 'ghost')));
+        }
+        if (stepped) {
+          parts.push(h('section', { class: 'pick-block' },
+            h('div', { class: 'row-between pick-head' }, h('h3', {}, '退階、同級、進階'), h('span', { class: 'muted small' }, pilatesTagText(latest.tags))),
+            h('div', { class: 'step-cols' }, [['easier', '退階'], ['same', '同級'], ['harder', '進階']].map(([key, title]) => h('div', { class: 'step-col' },
+              h('span', { class: 'step-title' }, title),
+              steps[key].length ? steps[key].map(pick) : h('span', { class: 'muted small' }, '沒有'))))));
+          offered = [...offered, ...steps.easier, ...steps.same, ...steps.harder];
         }
       }
       const common = commonExercises(items, usage, current?.id).filter((item) => !offered.includes(item));
       parts.push(block('常用動作', common.length || managing ? (managing ? items : common) : [],
         items.length > 0 && button(managing ? '完成' : '設定常用', () => { managing = !managing; draw(); }, 'ghost')));
       if (!common.length && !managing) parts.push(h('p', { class: 'muted' }, '用過的動作會自動排到這裡，也可以按「設定常用」自己挑。'));
-      if (!managing) {
+      const tagged = kind === 'pilates' && items.some((item) => item.tags);
+      if (!managing && tagged) {
+        parts.push(h('section', { class: 'pick-block' }, h('h3', {}, '依分類找'),
+          pilatesFinder(items, filters, draw, (list) => h('div', { class: 'pick-grid' }, list.map(pick)))));
+        parts.push(button('＋ 新增動作', add, 'add-row'));
+      }
+      if (!managing && !tagged) {
         const groups = groupsOf(items, kind);
         parts.push(h('section', { class: 'pick-block' },
           h('h3', {}, kind === 'pilates' ? '依器材找' : '依部位找'),
@@ -154,13 +215,47 @@ export function exercisePicker(defaultKind, onPick, { current = null } = {}) {
   return h('div', { class: 'stack' }, tabs, search, results);
 }
 
+/** Chips for the Pilates classification. The teacher's changes are kept even when the handout is imported again. */
+function tagEditor(exercise) {
+  const tags = { region: '', posture: '', focus: [], level: 0, muscles: [], family: '', ...(exercise.tags || {}) };
+  const area = h('div', { class: 'stack-sm' });
+  const muscles = h('input', { class: 'input', value: tags.muscles.join('、'), maxlength: 60, placeholder: '例如：臀肌、腹肌', 'aria-label': '主要肌群' });
+  const single = (key, label, values, toValue = (v) => v) => h('div', { class: 'finder-row', role: 'group', 'aria-label': label },
+    h('span', { class: 'finder-label' }, label),
+    h('div', { class: 'chips' }, values.map((value) => button(value, () => {
+      tags[key] = tags[key] === toValue(value) ? (key === 'level' ? 0 : '') : toValue(value);
+      draw();
+    }, 'chip-btn', { 'aria-pressed': tags[key] === toValue(value) ? 'true' : 'false' }))));
+  function draw() {
+    area.replaceChildren(
+      single('region', '部位', PILATES_REGIONS),
+      single('posture', '姿勢', PILATES_POSTURES),
+      h('div', { class: 'finder-row', role: 'group', 'aria-label': '重點' },
+        h('span', { class: 'finder-label' }, '重點'),
+        h('div', { class: 'chips' }, PILATES_FOCUS.map((value) => button(value, () => {
+          tags.focus = tags.focus.includes(value) ? tags.focus.filter((f) => f !== value) : [...tags.focus, value];
+          draw();
+        }, 'chip-btn', { 'aria-pressed': tags.focus.includes(value) ? 'true' : 'false' })))),
+      single('level', '程度', PILATES_LEVELS, (v) => PILATES_LEVELS.indexOf(v) + 1),
+      h('label', { class: 'field' }, h('span', { class: 'stepper-label' }, '主要肌群（用、分開）'), muscles));
+  }
+  draw();
+  return {
+    el: area,
+    value: () => cleanPilatesTags({ ...tags, muscles: muscles.value.split(/[、,，]/) }),
+  };
+}
+
 function editSheet(exercise) {
   openSheet('編輯動作', (close) => {
     const name = h('input', { class: 'input', value: exercise.name, 'aria-label': '動作名稱' });
     const group = h('input', { class: 'input', value: exercise.group || '', 'aria-label': '分類或器材' });
+    const tags = exercise.kind === 'pilates' ? tagEditor(exercise) : null;
     return h('div', { class: 'stack' },
       h('div', { class: 'stepper-label' }, '動作名稱'), name,
       h('div', { class: 'stepper-label' }, exercise.kind === 'pilates' ? '器材' : '分類'), group,
+      tags && h('div', { class: 'stepper-label' }, '分類（找動作和建議退階、進階用）'),
+      tags?.el,
       button(exercise.pinned ? '★ 已設為常用，點一下取消' : '☆ 設為常用', () => {
         store.save('exercises', { ...exercise, pinned: !exercise.pinned });
         close();
@@ -168,7 +263,7 @@ function editSheet(exercise) {
       }, ''),
       button(`設定替代動作（${(exercise.alternatives || []).length}）`, () => { close(); alternativesSheet(store.get('exercises', exercise.id) || exercise); }, ''),
       h('div', { class: 'row-between' },
-        button('從動作庫移除', () => {
+        holdButton('從動作庫移除', () => {
           store.save('exercises', { ...exercise, deleted: true });
           close();
           refreshView();
@@ -182,7 +277,12 @@ function editSheet(exercise) {
         }, 'ghost'),
         button('儲存', () => {
           if (!name.value.trim()) { toast('名稱不可空白'); return; }
-          store.save('exercises', { ...exercise, name: name.value.trim(), group: group.value.trim() });
+          const next = { ...exercise, name: name.value.trim(), group: group.value.trim() };
+          if (tags) {
+            const value = tags.value();
+            if (JSON.stringify(value) !== JSON.stringify(exercise.tags || null)) Object.assign(next, { tags: value, tagsEdited: true });
+          }
+          store.save('exercises', next);
           close();
           refreshView();
         }, 'primary')));
@@ -228,7 +328,32 @@ function importSheet() {
   }, { wide: true });
 }
 
+// Kept while the app is open, so going into an exercise and back keeps the same filters.
+const libraryFilters = emptyFilters();
+
 export function libraryView() {
+  const open = (exercise) => (exercise.handoutId ? handoutSheet(exercise, { onEdit: editSheet }) : editSheet(exercise));
+  const itemButton = (exercise) => button(exerciseLabel(exercise, exercise.pinned ? '★ ' : ''), () => open(exercise), 'pick');
+  const pilatesSection = () => {
+    const items = byKind('pilates');
+    if (!items.some((item) => item.tags)) return section('pilates', '皮拉提斯');
+    const area = h('div', { class: 'stack' });
+    const draw = () => {
+      const active = Object.values(libraryFilters).some(Boolean);
+      const regions = [...PILATES_REGIONS, '未分類'];
+      area.replaceChildren(...[
+        h('div', { class: 'card' }, pilatesFinder(items, libraryFilters, draw, (list) => h('div', { class: 'pick-grid' }, list.map(itemButton)))),
+        !active && h('div', { class: 'bento' }, regions.map((region) => {
+          const list = items.filter((item) => (item.tags?.region || '未分類') === region);
+          return list.length > 0 && h('div', { class: `card stack-sm ${list.length > 10 ? 'span-6' : 'span-3'}` },
+            h('h3', {}, `${region}（${list.length}）`),
+            h('div', { class: 'pick-grid' }, list.map(itemButton)));
+        })),
+      ].filter(Boolean));
+    };
+    draw();
+    return h('section', { class: 'stack span-6' }, h('h2', {}, `皮拉提斯（${items.length}）`), area);
+  };
   const section = (kind, title) => {
     const items = byKind(kind);
     const groups = new Map();
@@ -242,7 +367,7 @@ export function libraryView() {
       items.length === 0 && h('p', { class: 'muted' }, kind === 'pilates' ? '還沒有動作，可以按「匯入講義」。' : '還沒有動作，可以按「批次匯入」。'),
       h('div', { class: 'bento' }, [...groups.entries()].map(([group, list]) => h('div', { class: `card stack-sm ${list.length > 10 ? 'span-6' : 'span-3'}` },
         h('h3', {}, group),
-        h('div', { class: 'pick-grid' }, list.map((exercise) => button(exercise.pinned ? `★ ${exercise.name}` : exercise.name, () => (exercise.handoutId ? handoutSheet(exercise, { onEdit: editSheet }) : editSheet(exercise)), 'pick')))))));
+        h('div', { class: 'pick-grid' }, list.map(itemButton))))));
   };
   return h('div', { class: 'screen has-tabs' },
     h('header', { class: 'topbar page-title library-bar' },
@@ -251,6 +376,6 @@ export function libraryView() {
         button('匯入講義', importHandoutSheet, 'ghost'),
         button('批次匯入', importSheet, 'ghost'),
         button('＋ 新增動作', () => addExerciseSheet('strength', '', null, () => refreshView()), 'primary'))),
-    h('main', { class: 'page stack-lg' }, section('pilates', '皮拉提斯'), section('strength', '重訓')),
+    h('main', { class: 'page stack-lg' }, pilatesSection(), section('strength', '重訓')),
     tabBar('library'));
 }

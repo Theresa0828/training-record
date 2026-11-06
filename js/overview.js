@@ -1,5 +1,5 @@
 // Who this student is right now, readable in three seconds. Each card shows one point; a tap gives the detail.
-import { h, button, backButton, go, back, home, openSheet, confirmSheet, toast, refreshView } from './dom.js';
+import { h, button, holdButton, backButton, go, back, home, openSheet, confirmSheet, toast, refreshView } from './dom.js';
 import * as store from './store.js';
 import { classNumberSheet, nextDateSheet } from './classinfo.js';
 import {
@@ -9,7 +9,8 @@ import {
 import { exportPdf } from './print.js';
 import { icon } from './icons.js';
 import { trendChart } from './trend.js';
-import { termRing, calendarPage, sparkline, painBars, learnedBar, qualityDots } from './charts.js';
+import { termRing, calendarPage, sparkline, painBars, learnedTile, qualityDots } from './charts.js';
+import { bodyMap } from './bodymap.js';
 import { sessionTable, sessionFacts, sessionTitle } from './history.js';
 
 function shortDate(key) {
@@ -84,8 +85,16 @@ function editProfileSheet(student) {
   });
 }
 
+function historySheet(history) {
+  openSheet(`過去紀錄（${history.length}）`, () => h('div', { class: 'stack-sm' }, history.map((session) => button(sessionTitle(session), () => {
+    openSheet(session.date.replaceAll('-', '/'), () => h('div', { class: 'stack-sm' }, sessionFacts(session), sessionTable(session)), { wide: true });
+  }, 'list-item'))));
+}
+
 function pdfSheet(student, history) {
+  const unsigned = history.filter((s) => !s.studentSignature).length;
   openSheet('匯出 MRE005 PDF', (close) => h('div', { class: 'stack' },
+    unsigned > 0 && h('p', { class: 'muted' }, `有 ${unsigned} 堂還沒有學生簽名。`),
     [3, 6, 12].filter((n) => n <= history.length || n === 3).map((n) => button(`最近 ${Math.min(n, history.length)} 堂`, () => {
       close();
       exportPdf(student, history.slice(0, n));
@@ -109,7 +118,7 @@ function textCard(student, span, title, iconName, value, emptyText, className = 
       button('編輯資料', () => { close(); editProfileSheet(student); }, '')))
     : () => editProfileSheet(student);
   return card(span, title, iconName, open, value
-    ? h('span', { class: 'card-text' }, h('span', { class: 'card-head' }, head), rest && h('span', { class: 'card-rest' }, rest))
+    ? h('span', { class: 'card-text' }, h('span', { class: 'card-head' }, head), rest && h('span', { class: 'card-rest card-more' }, rest))
     : h('span', { class: 'card-text' }, h('span', { class: 'card-empty' }, emptyText)), value ? className : '');
 }
 
@@ -138,10 +147,10 @@ function nextCard(student) {
   h('span', { class: 'term-body' }, calendarPage(info.date), h('span', { class: 'term-side' }, info.time && h('span', { class: 'next-time' }, info.time), h('span', { class: info.confirmed ? 'muted small' : 'card-note' }, state))));
 }
 
-function statusCard(history) {
+function statusCard(history, span) {
   const status = overallStatus(history);
   const iconName = status.tone === 'up' ? 'up' : status.tone === 'alert' ? 'warn' : 'flat';
-  return h('section', { class: `stat-card rise span-2 status-${status.tone}` },
+  return h('section', { class: `stat-card rise ${span} status-${status.tone}` },
     h('span', { class: 'card-title' }, h('span', {}, '整體狀態')),
     h('span', { class: 'status-body' },
       h('span', { class: 'status-mark' }, icon(iconName)),
@@ -157,17 +166,19 @@ function learnedSheet(summary) {
     summary.strength.count + summary.pilates.count === 0 && h('p', { class: 'muted' }, '還沒有上課紀錄。')));
 }
 
+// Every body part has a tile of the same size, so the card never grows as more exercises are learned.
 function learnedCard(history, span) {
   const summary = learnedSummary(history, store.all('exercises'), (id) => store.get('exercises', id));
   const level = pilatesLevel(history);
   const showStrength = summary.strength.count > 0 || summary.pilates.count === 0;
+  const tiles = (groups) => h('span', { class: 'learn-tiles' }, groups.map((group) => learnedTile(group.group, group.learned, group.total)));
   return card(span, '學習程度', null, () => learnedSheet(summary), [
     showStrength && h('span', { class: 'learn-block' },
-      h('span', { class: 'card-head' }, `重訓 ${summary.strength.count} 個動作`),
-      summary.strength.groups.map((group) => learnedBar(group.group, group.learned, group.total))),
+      h('span', { class: 'learn-head' }, h('strong', {}, '重訓'), `學了 ${summary.strength.count} 個`),
+      tiles(summary.strength.groups)),
     summary.pilates.count > 0 && h('span', { class: 'learn-block' },
-      h('span', { class: 'card-head' }, `皮拉提斯 ${summary.pilates.count} 個`),
-      summary.pilates.groups.slice(0, 4).map((group) => learnedBar(group.group, group.learned, group.total)),
+      h('span', { class: 'learn-head' }, h('strong', {}, '皮拉提斯'), `學了 ${summary.pilates.count} 個`),
+      tiles(summary.pilates.groups.filter((group) => group.group !== '未分類' || group.learned)),
       (level.quality !== null || level.assist) && h('span', { class: 'level-row' },
         level.quality !== null && h('span', { class: 'level-item' }, h('span', { class: 'muted small' }, '品質'), qualityDots(level.quality), h('span', { class: 'small' }, level.quality)),
         level.assist && h('span', { class: 'level-item' }, h('span', { class: 'muted small' }, '協助'), h('span', { class: 'small' }, level.assist)))),
@@ -179,13 +190,13 @@ function changeText(change) {
   return `${change > 0 ? '+' : '−'}${Math.abs(change)} kg`;
 }
 
-function weightCard(history) {
-  const trends = weightTrends(history);
+function weightCard(history, span) {
+  const trends = weightTrends(history, 2);
   const all = weightTrends(history, 12);
-  return card('span-3', '重量趨勢', null, () => openSheet('重量趨勢', () => h('div', { class: 'stack' },
+  return card(span, '重量趨勢', null, () => openSheet('重量趨勢', () => h('div', { class: 'stack' },
     all.length ? all.map((item) => trendChart(item.name, item.points, Math.min(window.innerWidth, 620) - 48)) : h('p', { class: 'muted' }, '同一個動作上過兩堂，就會出現趨勢。')), { wide: true }),
   trends.length
-    ? h('span', { class: 'series-list' }, trends.map((item) => h('span', { class: 'series-row' },
+    ? h('span', { class: 'series-list' }, trends.map((item) => h('span', { class: 'series-row is-stacked' },
       h('span', { class: 'series-name' }, item.name),
       sparkline(item.points.map((point) => point.weight), `${item.name} 從 ${item.points[0].weight} 到 ${item.points.at(-1).weight} 公斤`),
       h('span', { class: 'series-change' }, item.change > 0 && icon('up'), item.change < 0 && icon('down'), changeText(item.change)))))
@@ -194,27 +205,44 @@ function weightCard(history) {
 
 const PAIN_WORDS = { up: '上升', down: '下降', same: '持平' };
 
+/** The latest score of every part that hurt lately, drawn on the body. Parts back to 0 are left plain. */
+function painFigure(series, readOnly) {
+  const map = bodyMap(() => {}, { readOnly });
+  map.update(Object.fromEntries(series.filter((item) => item.latest > 0 && item.part !== '未標部位').map((item) => [item.part, item.latest])), null);
+  return map.el;
+}
+
 function painSheet(history) {
   const items = recentPain(history, 12);
-  openSheet('疼痛紀錄', () => h('div', { class: 'stack-sm' },
+  const series = painSeries(history);
+  openSheet('疼痛紀錄', () => h('div', { class: 'stack' },
+    series.length > 0 && h('div', { class: 'pain-sheet-map' }, painFigure(series, true),
+      h('p', { class: 'muted small' }, '圖上的數字是最近一堂的分數，已經不痛的部位不上色。')),
+    series.length > 0 && h('div', { class: 'series-list' }, series.map((item) => h('div', { class: 'series-row' },
+      h('span', { class: 'series-name' }, item.part),
+      painBars(item.scores, `${item.part} 最近 ${item.scores.length} 堂的分數：${item.scores.join('、')}`),
+      h('span', { class: 'series-change' }, `${item.latest} 分`, h('span', { class: 'muted small' }, PAIN_WORDS[item.direction]))))),
     items.length
-      ? items.map((p) => h('div', { class: 'history-row' }, h('strong', {}, `${shortDate(p.date)} ${p.exercise}`), h('div', {}, p.text), p.note && h('div', { class: 'muted small' }, p.note)))
-      : h('p', { class: 'muted' }, '最近沒有疼痛紀錄。')));
+      ? h('div', { class: 'stack-sm' }, h('div', { class: 'stepper-label' }, '每次紀錄'),
+        items.map((p) => h('div', { class: 'history-row' }, h('strong', {}, `${shortDate(p.date)} ${p.exercise}`), h('div', {}, p.text), p.note && h('div', { class: 'muted small' }, p.note))))
+      : h('p', { class: 'muted' }, '最近沒有疼痛紀錄。')), { wide: true });
 }
 
 function painCard(history) {
   const series = painSeries(history);
-  const sore = series.some((item) => item.latest > 0);
+  const sore = series.filter((item) => item.latest > 0);
   return card('span-3', '疼痛變化', null, () => painSheet(history),
     series.length
-      ? h('span', { class: 'series-list' },
-        series.slice(0, 3).map((item) => h('span', { class: 'series-row' },
-          h('span', { class: 'series-name' }, item.part),
-          painBars(item.scores, `${item.part} 最近 ${item.scores.length} 堂的分數：${item.scores.join('、')}`),
-          h('span', { class: 'series-change' }, `${item.latest} 分`, h('span', { class: 'muted small' }, PAIN_WORDS[item.direction])))),
-        series.length > 3 && h('span', { class: 'muted small' }, `還有 ${series.length - 3} 個部位`))
+      ? h('span', { class: 'pain-card' },
+        painFigure(series, true),
+        h('span', { class: 'pain-list' },
+          (sore.length ? sore : series).slice(0, 3).map((item) => h('span', { class: 'pain-item' },
+            h('span', { class: 'pain-part' }, item.part),
+            h('span', { class: 'pain-score' }, `${item.latest} 分`),
+            h('span', { class: 'muted small' }, PAIN_WORDS[item.direction]))),
+          series.length > 3 && h('span', { class: 'muted small' }, `共 ${series.length} 個部位`)))
       : h('span', { class: 'pain-none' }, icon('check'), h('span', { class: 'card-head' }, history.length ? '沒有疼痛' : '尚無紀錄')),
-    sore ? 'is-alert' : '');
+    sore.length ? 'is-alert' : '');
 }
 
 const BODY_FIELDS = [['weight', '體重', 'kg', 400], ['fat', '體脂', '%', 80], ['muscle', '肌肉量', 'kg', 200]];
@@ -250,7 +278,7 @@ function bodySheet(student) {
         h('div', { class: 'stepper-label' }, '過去量測'),
         sorted.map((item) => h('div', { class: 'row-between option-row' },
           h('span', {}, `${item.date.replaceAll('-', '/')}　${BODY_FIELDS.filter(([key]) => item[key]).map(([key, label, unit]) => `${label} ${item[key]}${unit}`).join('・')}`),
-          button('移除', () => {
+          holdButton('移除', () => {
             const before = store.get('students', student.id).bodyComp || [];
             saveList(before.filter((other) => other.date !== item.date));
             close();
@@ -260,14 +288,14 @@ function bodySheet(student) {
   });
 }
 
-function bodyCard(student) {
+function bodyCard(student, span) {
   const { latest, previous, due } = bodyCompSummary(student.bodyComp, dateKey());
   const delta = (key) => {
     if (!latest?.[key] || !previous?.[key]) return '';
     const change = Math.round((latest[key] - previous[key]) * 10) / 10;
     return change ? `${change > 0 ? '+' : '−'}${Math.abs(change)}` : '持平';
   };
-  return card('span-3', '身體組成', null, () => bodySheet(student),
+  return card(span, '身體組成', null, () => bodySheet(student),
     latest
       ? [
         h('span', { class: 'body-stats' }, BODY_FIELDS.map(([key, label, unit]) => h('span', { class: 'body-stat' },
@@ -284,7 +312,6 @@ export function overviewView({ studentId }) {
   const history = doneSessions(store.all('sessions'), studentId);
   const plan = store.get('plans', studentId);
   const hasPlan = plan && !plan.used && plan.rows?.length;
-  const unsigned = history.filter((s) => !s.studentSignature).length;
   const today = dateKey();
   const inClass = store.all('sessions').some((s) => s.studentId === studentId && s.date === today && s.status === 'draft');
   const bookedToday = store.all('events').some((e) => e.date === today && e.student && findStudentByName([student], e.student));
@@ -296,36 +323,27 @@ export function overviewView({ studentId }) {
   const hasPilates = history.some((session) => session.rows.some((row) => row.kind === 'pilates'));
   const pilatesOnly = hasPilates && !hasStrength;
 
-  return h('div', { class: 'screen has-action' },
+  // Fits one iPad screen: text first, then class count and date, learning and pain, then the numbers.
+  return h('div', { class: 'screen has-action overview' },
     h('header', { class: 'topbar' },
       backButton(),
       h('h1', {}, student.name),
-      button('編輯資料', () => editProfileSheet(student), 'ghost')),
+      h('div', { class: 'topbar-actions' },
+        history.length > 0 && button(`紀錄 ${history.length}`, () => historySheet(history), 'ghost', { 'aria-label': `過去紀錄，共 ${history.length} 堂` }),
+        history.length > 0 && button('PDF', () => pdfSheet(student, history), 'ghost', { 'aria-label': '匯出 PDF' }),
+        button('編輯資料', () => editProfileSheet(student), 'ghost'))),
     h('main', { class: 'page bento' },
-      textCard(student, 'span-6', '疼痛與禁忌', 'warn', student.contraindications, '還沒填寫，點一下填寫', 'is-alert'),
-      textCard(student, 'span-3', '訓練目標', null, student.goal, '還沒填寫，點一下填寫'),
+      textCard(student, 'span-3', '疼痛與禁忌', 'warn', student.contraindications, '還沒填寫，點一下填寫', 'is-alert'),
       textCard(student, 'span-3', '下次要注意', null, student.nextNotes, '沒有註記'),
+      textCard(student, 'span-2', '訓練目標', null, student.goal, '還沒填寫，點一下填寫'),
       termCard(studentId, todaySession, count),
       nextCard(student),
-      statusCard(history),
-      learnedCard(history, pilatesOnly ? 'span-6' : 'span-3'),
-      !pilatesOnly && weightCard(history),
+      learnedCard(history, 'span-3'),
       painCard(history),
-      bodyCard(student),
-      history.length > 0 && fold(`過去紀錄（${history.length}）`, history.map((session) => button(sessionTitle(session), () => {
-        openSheet(session.date.replaceAll('-', '/'), () => h('div', { class: 'stack-sm' }, sessionFacts(session), sessionTable(session)), { wide: true });
-      }, 'list-item'))),
-      history.length > 0 && fold('匯出 PDF', [
-        unsigned > 0 && h('p', { class: 'muted' }, `有 ${unsigned} 堂還沒有學生簽名。`),
-        button('選擇要匯出的課', () => pdfSheet(student, history), 'list-item'),
-      ])),
+      statusCard(history, pilatesOnly ? 'span-3' : 'span-2'),
+      !pilatesOnly && weightCard(history, 'span-2'),
+      bodyCard(student, pilatesOnly ? 'span-3' : 'span-2')),
     h('div', { class: 'action-bar' },
       button('排下次', () => go('plan', { studentId }), classFirst ? '' : 'primary'),
       button(inClass ? '繼續上課' : '開始上課', () => go('record', { studentId }), classFirst ? 'primary' : '')));
-}
-
-function fold(title, ...body) {
-  return h('details', { class: 'fold span-6' },
-    h('summary', {}, h('span', {}, title), icon('next')),
-    h('div', { class: 'fold-body' }, body));
 }

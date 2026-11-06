@@ -1,5 +1,5 @@
 // Plans the next class: starts from last time, then the teacher tweaks it.
-import { h, button, back, backButton, go, openSheet, toast, dismissActionToast } from './dom.js';
+import { h, button, holdButton, back, backButton, go, openSheet, toast, dismissActionToast } from './dom.js';
 import * as store from './store.js';
 import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, swapRow, commonSprings, moveRow, BAND } from './core.js';
 import { exercisePicker, rememberSwaps } from './library.js';
@@ -155,10 +155,10 @@ export function planView({ studentId }) {
         h('div', { class: 'row-wrap' },
           handoutButton(row.exerciseId),
           h('button', { type: 'button', class: 'btn swap-btn', onclick: () => swapExercise(row, index) }, icon('swap'), h('span', {}, '換動作')),
-          button('移除', () => {
+          holdButton('移除', () => {
             change(() => plan.rows.splice(index, 1));
             toast(`已移除 ${row.name}`, { label: '復原', run: undoOnce });
-          }, 'ghost'))),
+          }, 'ghost danger-text'))),
       suggestion && !alreadyApplied && h('div', { class: 'suggestion' },
         h('span', {}, `連續兩次達標，建議 ${suggestion.from} → ${suggestion.to} kg`),
         button('採用', () => change(() => applySuggestion(row, suggestion)), 'primary'),

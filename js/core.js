@@ -315,21 +315,95 @@ export function isHandoutFile(data) {
  */
 export function planHandoutImport(file, active, getById) {
   const byName = new Map(active.filter((e) => e.kind === 'pilates').map((e) => [e.name, e]));
+  const byHandout = new Map(active.filter((e) => e.handoutId).map((e) => [e.handoutId, e]));
   const add = [];
   const link = [];
+  const update = [];
+  // The classification in the file refreshes on every import, unless the teacher changed it by hand.
+  const withTags = (exercise, tags) => (tags && !exercise.tagsEdited ? { ...exercise, tags } : exercise);
+  const differs = (a, b) => JSON.stringify(a || null) !== JSON.stringify(b || null);
   for (const item of file.exercises) {
     const id = `hd_${item.id}`;
-    if (getById(id)) continue;
-    const same = byName.get(item.name);
-    if (same) {
-      if (!same.handoutId) link.push({ ...same, handoutId: item.id, order: item.order });
+    const tags = cleanPilatesTags(item.tags);
+    const existing = getById(id) || byHandout.get(item.id);
+    if (existing) {
+      if (tags && !existing.tagsEdited && differs(existing.tags, tags)) update.push({ ...existing, tags });
       continue;
     }
-    const exercise = { id, name: item.name, group: item.group, kind: 'pilates', handoutId: item.id, order: item.order };
+    const same = byName.get(item.name);
+    if (same) {
+      if (!same.handoutId) link.push(withTags({ ...same, handoutId: item.id, order: item.order }, tags));
+      continue;
+    }
+    const exercise = withTags({ id, name: item.name, group: item.group, kind: 'pilates', handoutId: item.id, order: item.order }, tags);
     add.push(exercise);
     byName.set(item.name, exercise);
   }
-  return { add, link };
+  return { add, link, update };
+}
+
+// How Pilates exercises are classified, so the right one can be found in a few taps.
+export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
+export const PILATES_POSTURES = ['仰躺', '俯趴', '側躺', '坐姿', '跪姿', '四足', '平板', '站姿', '弓箭步'];
+export const PILATES_FOCUS = ['穩定', '活動度', '協調', '平衡', '肌力'];
+export const PILATES_LEVELS = ['入門', '中階', '進階'];
+
+/** Keeps only known values, so an edited or damaged file can never show odd labels. */
+export function cleanPilatesTags(tags) {
+  if (!tags || typeof tags !== 'object') return null;
+  const one = (value, list) => (list.includes(value) ? value : '');
+  const words = (value, max) => (Array.isArray(value)
+    ? [...new Set(value.filter((w) => typeof w === 'string' && w.trim()).map((w) => w.trim().slice(0, 12)))].slice(0, max)
+    : []);
+  const clean = {
+    region: one(tags.region, PILATES_REGIONS),
+    posture: one(tags.posture, PILATES_POSTURES),
+    focus: words(tags.focus, PILATES_FOCUS.length).filter((f) => PILATES_FOCUS.includes(f)),
+    level: [1, 2, 3].includes(tags.level) ? tags.level : 0,
+    muscles: words(tags.muscles, 6),
+    family: typeof tags.family === 'string' ? tags.family.trim().slice(0, 20) : '',
+  };
+  return clean.region || clean.posture || clean.focus.length || clean.level || clean.muscles.length ? clean : null;
+}
+
+/** One short line under a Pilates exercise name, such as 下肢・仰躺・入門. */
+export function pilatesTagText(tags) {
+  if (!tags) return '';
+  return [tags.region, tags.posture, PILATES_LEVELS[tags.level - 1]].filter(Boolean).join('・');
+}
+
+/** Filters the library by any mix of 部位, 姿勢, 重點, 程度 and 器材. Empty filters let everything through. */
+export function filterPilates(list, filters = {}) {
+  return list.filter((e) => (!filters.region || e.tags?.region === filters.region)
+    && (!filters.posture || e.tags?.posture === filters.posture)
+    && (!filters.focus || (e.tags?.focus || []).includes(filters.focus))
+    && (!filters.level || e.tags?.level === filters.level)
+    && (!filters.apparatus || e.group === filters.apparatus));
+}
+
+/**
+ * Easier, same-level and harder exercises for a Pilates exercise. The same series comes first,
+ * then the same body region in the same position, then a shared focus.
+ */
+export function pilatesSteps(current, library, limit = 3) {
+  const empty = { easier: [], same: [], harder: [] };
+  const mine = current?.tags;
+  if (!mine?.level) return empty;
+  const shared = (a = [], b = []) => a.filter((x) => b.includes(x)).length;
+  const scored = [];
+  for (const e of library) {
+    const t = e.tags;
+    if (e.id === current.id || e.kind !== 'pilates' || e.deleted || !t?.level) continue;
+    const family = mine.family && t.family === mine.family;
+    const region = t.region === mine.region;
+    const posture = t.posture === mine.posture;
+    const focus = shared(t.focus, mine.focus);
+    if (!family && !(region && (posture || focus))) continue;
+    scored.push({ e, score: (family ? 100 : 0) + (region ? 20 : 0) + (posture ? 10 : 0) + focus * 3 + shared(t.muscles, mine.muscles) * 2 - Math.abs(t.level - mine.level) });
+  }
+  scored.sort((a, b) => b.score - a.score || (a.e.order ?? 0) - (b.e.order ?? 0));
+  const pick = (test) => scored.filter(({ e }) => test(e.tags.level)).slice(0, limit).map(({ e }) => e);
+  return { easier: pick((l) => l < mine.level), same: pick((l) => l === mine.level), harder: pick((l) => l > mine.level) };
 }
 
 /** Bookings from the calendar that have no unused plan yet, for the "needs planning" list. */
@@ -568,22 +642,26 @@ export function learnedSummary(history, library, find = () => null) {
   for (const session of history) {
     for (const row of session.rows) {
       if (learned.has(row.exerciseId) || !row.sets.some((s) => s.done)) continue;
-      learned.set(row.exerciseId, { name: row.name, kind: row.kind, group: find(row.exerciseId)?.group || '其他' });
+      const exercise = find(row.exerciseId);
+      const group = row.kind === 'pilates' ? exercise?.tags?.region || '未分類' : exercise?.group || '其他';
+      learned.set(row.exerciseId, { name: row.name, kind: row.kind, group });
     }
   }
   const forKind = (kind) => {
     const mine = [...learned.values()].filter((item) => item.kind === kind);
     const totals = new Map();
     for (const item of library) {
-      if (item.kind === kind) totals.set(item.group, (totals.get(item.group) || 0) + 1);
+      if (item.kind !== kind) continue;
+      const group = kind === 'pilates' ? item.tags?.region || '未分類' : item.group;
+      totals.set(group, (totals.get(group) || 0) + 1);
     }
-    const names = kind === 'strength' ? [...BODY_GROUPS] : [];
+    // A fixed list of groups, so the card keeps the same size however many exercises are learned.
+    const names = kind === 'strength' ? [...BODY_GROUPS] : [...PILATES_REGIONS];
     for (const item of mine) if (!names.includes(item.group)) names.push(item.group);
     const groups = names.map((group) => {
       const items = mine.filter((item) => item.group === group);
       return { group, learned: items.length, total: Math.max(totals.get(group) || 0, items.length), names: items.map((item) => item.name) };
     });
-    if (kind === 'pilates') groups.sort((a, b) => b.learned - a.learned);
     return { count: mine.length, groups };
   };
   return { strength: forKind('strength'), pilates: forKind('pilates') };

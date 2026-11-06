@@ -7,7 +7,7 @@ import { recordView, settleOldDrafts } from './record.js';
 import { overviewView } from './overview.js';
 import { planView } from './plan.js';
 import { libraryView } from './library.js';
-import { settingsView } from './settings.js';
+import { settingsView, paletteId } from './settings.js';
 import { studentsView } from './students.js';
 
 // A button that fails must say so. Silence looks like the tap never landed.
@@ -21,7 +21,7 @@ async function boot() {
   installTapGuard();
   installKeyboardLift();
   await store.loadStore();
-  document.documentElement.dataset.palette = store.getMeta('palette', 'mist');
+  document.documentElement.dataset.palette = paletteId(store.getMeta('palette'));
   settleOldDrafts();
 
   registerView('today', todayView);

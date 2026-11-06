@@ -80,14 +80,14 @@ export function painBars(scores, label) {
   return chart;
 }
 
-/** A horizontal bar: how much of a body part or apparatus has been learned. */
-export function learnedBar(label, learned, total) {
+/** One body part as a small tile: its name, how many were learned out of the library, and a thin bar. */
+export function learnedTile(label, learned, total) {
   const fill = h('span', { class: 'learn-fill' });
   fill.style.width = `${total ? Math.min(100, (learned / total) * 100) : 0}%`;
-  return h('div', { class: 'learn-row', role: 'img', 'aria-label': `${label} 學了 ${learned} 個，共 ${total} 個` },
+  return h('span', { class: `learn-tile${learned ? '' : ' is-none'}`, role: 'img', 'aria-label': `${label} 學了 ${learned} 個，共 ${total} 個` },
     h('span', { class: 'learn-name' }, label),
-    h('span', { class: 'learn-track' }, fill),
-    h('span', { class: 'learn-count' }, `${learned}/${total}`));
+    h('span', { class: 'learn-count' }, h('strong', {}, learned), `/${total}`),
+    h('span', { class: 'learn-track' }, fill));
 }
 
 /** Five dots for the Pilates quality score. */
