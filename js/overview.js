@@ -385,6 +385,7 @@ export function overviewView({ studentId }) {
       h('div', { class: 'topbar-actions' },
         history.length > 0 && button(`紀錄 ${history.length}`, () => historySheet(history), 'ghost', { 'aria-label': `過去紀錄，共 ${history.length} 堂` }),
         history.length > 0 && button('PDF', () => pdfSheet(student, history), 'ghost', { 'aria-label': '匯出 PDF' }),
+        history.length > 0 && button('給學生看', () => go('report', { studentId: student.id }), 'ghost'),
         button('編輯資料', () => editProfileSheet(student), 'ghost'))),
     h('main', { class: 'page bento' },
       textCard(student, 'span-3', '疼痛與禁忌', 'warn', student.contraindications, '還沒填寫，點一下填寫', 'is-alert'),

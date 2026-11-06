@@ -760,3 +760,109 @@ export function bodyCompSummary(list, today) {
   if (!latest) return { latest: null, previous: null, sorted, due: true };
   return { latest, previous: previous || null, sorted, due: addDays(latest.date, BODY_COMP_DAYS) <= today };
 }
+
+// ---------- The student's report of today's class ----------
+// Read by students with no training background, many of them older: plain words, concrete numbers.
+
+/** Body parts in everyday words. Strength groups and Pilates regions share them where they mean the same. */
+export const LAY_REGIONS = {
+  下肢: '腿和臀部', 胸: '胸部', 背: '背部', 肩: '肩膀', 手臂: '手臂', 核心: '腹部（核心）',
+  脊椎: '脊椎活動', 肩臂: '肩膀和手臂', 全身: '全身',
+};
+
+export function layRegion(group) {
+  return LAY_REGIONS[group] || group || '';
+}
+
+const SPRING_WORDS = { r: '紅', b: '藍', y: '黃', g: '綠' };
+
+/** The springs of one set as colours to draw and words to read: 紅 2・藍 1. */
+export function springParts(text) {
+  const spring = springFromText(text);
+  const colors = SPRING_COLORS.filter((c) => spring.counts[c] > 0);
+  return {
+    dots: colors.flatMap((c) => Array(spring.counts[c]).fill(c)),
+    words: colors.map((c) => `${SPRING_WORDS[c]} ${spring.counts[c]}`).join('・'),
+  };
+}
+
+/** The heaviest finished set of an exercise in a class, on the given equipment ('' matches any). */
+function heaviest(row) {
+  const done = row.sets.filter((s) => s.done && s.weight > 0);
+  return done.length ? Math.max(...done.map((s) => s.weight)) : 0;
+}
+
+/**
+ * One line per exercise that had at least one finished set: what it was, how heavy, how many, how hard.
+ * history is the student's earlier classes, newest first, for "heavier than last time".
+ */
+export function reportRows(session, history, find = () => null) {
+  return session.rows.filter((row) => row.sets.some((s) => s.done)).map((row) => {
+    const exercise = find(row.exerciseId);
+    const done = row.sets.filter((s) => s.done);
+    const reps = [...new Set(done.map((s) => s.reps).filter(Boolean))].sort((a, b) => a - b);
+    const group = row.kind === 'pilates' ? exercise?.tags?.region : exercise?.group;
+    let amount;
+    if (row.kind === 'pilates') {
+      const last = [...done].reverse().find((s) => s.spring);
+      amount = last ? { type: 'spring', ...springParts(last.spring) } : { type: 'none' };
+    } else if (row.equipment === BAND) {
+      amount = { type: 'band', color: row.band || '' };
+    } else {
+      const weight = heaviest(row);
+      let up = 0;
+      if (weight) {
+        // The last class with this exercise on the same kind of equipment.
+        const before = history.map((s) => s.rows.find((r) => r.exerciseId === row.exerciseId))
+          .find((r) => r && r.equipment !== BAND && (!r.equipment || !row.equipment || r.equipment === row.equipment) && heaviest(r));
+        if (before) up = Math.max(0, Math.round((weight - heaviest(before)) * 100) / 100);
+      }
+      amount = weight ? { type: 'weight', weight, up } : { type: 'body' };
+    }
+    return {
+      id: row.id,
+      name: row.name,
+      kind: row.kind,
+      equipment: row.kind === 'pilates' ? (exercise?.group || '') : (row.equipment || ''),
+      region: layRegion(group),
+      amount,
+      reps: reps.length ? (reps.length === 1 ? `${reps[0]} 下` : `${reps[0]}–${reps.at(-1)} 下`) : '',
+      sets: done.length,
+      rpe: row.rpe || null,
+    };
+  });
+}
+
+/** How many of today's exercises worked each part, most first: 腿和臀部 3、背部 1. */
+export function reportRegions(rows) {
+  const counts = new Map();
+  for (const row of rows) if (row.region) counts.set(row.region, (counts.get(row.region) || 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([region, count]) => ({ region, count }));
+}
+
+/** 1–3 easy, 4–6 moderate, 7–10 hard, for colouring the effort bar. */
+export function effortLevel(rpe) {
+  if (!rpe) return '';
+  return rpe >= 7 ? 'high' : rpe >= 4 ? 'mid' : 'low';
+}
+
+/** Each sore part's highest score in a class, counting the check-in and every exercise. */
+export function classPain(session) {
+  const map = {};
+  for (const source of painSources(session)) {
+    for (const { part, score } of painList(source)) {
+      if (!part || score === null || score === undefined) continue;
+      map[part] = Math.max(map[part] ?? 0, score);
+    }
+  }
+  return map;
+}
+
+/** Today's pain beside the last class that scored the same part. */
+export function reportPain(session, history) {
+  const today = classPain(session);
+  return Object.entries(today).sort((a, b) => b[1] - a[1]).map(([part, score]) => {
+    const earlier = history.map(classPain).find((map) => part in map);
+    return { part, score, before: earlier ? earlier[part] : null };
+  });
+}

@@ -55,7 +55,7 @@ export function holdButton(label, onHold, className = '', props = {}) {
     clearTimeout(timer);
     timer = null;
     el.classList.remove('is-holding');
-    if (hint && Date.now() - started < HOLD_MS) toast(`要按住 1 秒才會${label.includes('刪除') ? '刪除' : '移除'}`);
+    if (hint && Date.now() - started < HOLD_MS) toast(`要按住 1 秒才會${label.includes('刪除') ? '刪除' : label.includes('移除') ? '移除' : label}`);
   };
   el.addEventListener('pointerdown', (e) => { if (e.button === 0) begin(); });
   el.addEventListener('pointerup', () => end(true));

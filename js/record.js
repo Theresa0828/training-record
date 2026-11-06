@@ -3,7 +3,7 @@ import { h, button, holdButton, backButton, go, home, openSheet, toast, dismissA
 import * as store from './store.js';
 import {
   MAX_SETS, DEFAULT_TAGS, DEFAULT_PROPS, chooserOptions, painList, painText, painShort, setPainMap, setText, rowDetails, exerciseHistory, exerciseTrend, ASSIST_LEVELS, dateKey, newId, makeRow, makeSet,
-  doneSessions, startingRows, isBpFlagged, expectedDigits, resolveStaleDraft, swapRow, commonSprings, nextClassNumber, classLabel, moveRow, setLoad, equipmentText, BAND,
+  doneSessions, startingRows, isBpFlagged, expectedDigits, resolveStaleDraft, swapRow, commonSprings, nextClassNumber, classLabel, moveRow, setLoad, equipmentText, BAND, effortLevel,
 } from './core.js';
 import { kindLabel } from './today.js';
 import { exercisePicker, rememberSwaps } from './library.js';
@@ -21,7 +21,7 @@ import { paramTile } from './param.js';
 
 const SET_NAMES = ['一', '二', '三', '四', '五'];
 const STATUS_FLAGS = [['pain', '疼痛'], ['sleep', '睡眠'], ['diet', '飲食'], ['mood', '心情']];
-const PANEL_TABS = [['set', '重量次數'], ['feel', '感受與標籤']];
+const PANEL_TABS = [['set', '重量次數'], ['feel', '感受與備註']];
 const UNDO_LIMIT = 60;
 
 /** The count runs by itself. Classes opened before it did get their number the first time they open. */
@@ -338,7 +338,7 @@ export function recordView({ studentId, kind }) {
     const row = selected && session.rows[selected.row];
     if (isAllDone()) return `全部做完了，按右上角「${session.status === 'done' ? '更新完成' : '完成上課'}」`;
     if (!row) return '點一個動作開始';
-    if (mode === 'feel') return `${row.name} 做完了，記一下 RPE 和感受`;
+    if (mode === 'feel') return `${row.name} 做完了，記一下費力和感受`;
     const set = row.sets[selected.set];
     if (set?.done) return `正在修改 ${row.name} 第${SET_NAMES[selected.set]}組`;
     return `現在做 ${row.name} 第${SET_NAMES[selected.set]}組，做完點亮起的格子`;
@@ -439,10 +439,11 @@ export function recordView({ studentId, kind }) {
     return store.all('options').filter((o) => o.type === type).map((o) => o.name);
   }
 
-  function chooser(label, options, current, onPick, className = '', extra = null) {
-    return h('div', { class: 'field' },
-      h('div', { class: 'stepper-label' }, label),
-      h('div', { class: `chips ${className}` }, options.map((option) => button(String(option), () => onPick(option), 'chip-btn', {
+  /** One group in 感受與備註: a picture and a name on the left, its choices beside it. */
+  function feelBox(label, iconName, options, current, onPick, { className = '', extra = null, chipClass = () => '' } = {}) {
+    return h('div', { class: `feel-box ${className}`.trim(), role: 'group', 'aria-label': label },
+      h('div', { class: 'feel-head' }, icon(iconName), h('span', {}, label)),
+      h('div', { class: 'feel-chips' }, options.map((option) => button(String(option), () => onPick(option), `chip-btn ${chipClass(option)}`.trim(), {
         'aria-pressed': current === option || (Array.isArray(current) && current.includes(option)) ? 'true' : 'false',
       })), extra));
   }
@@ -521,16 +522,22 @@ export function recordView({ studentId, kind }) {
       renderPanel();
     };
     const next = nextOpenRow(selected.row);
+    const pains = painList(row);
+    const pilates = row.kind === 'pilates';
     return [
       panelTop(row, '', null),
-      chooser('RPE', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], row.rpe, (v) => change(() => { row.rpe = row.rpe === v ? null : v; }), 'chips-10'),
-      button(painList(row).length ? `疼痛：${painText(row)}` : '記錄疼痛', () => openPainSheet(row), painList(row).length ? 'alert' : ''),
-      row.kind === 'pilates' && chooser('動作品質', [1, 2, 3, 4, 5], row.quality, (v) => change(() => { row.quality = row.quality === v ? null : v; }), 'chips-5'),
-      row.kind === 'pilates' && chooser('協助程度', ASSIST_LEVELS, row.assist, (v) => change(() => { row.assist = row.assist === v ? null : v; })),
-      chooser('標籤', chooserOptions(DEFAULT_TAGS, addedOptions('tag'), row.tags), row.tags, (v) => change(() => toggleIn(row.tags, v)), '',
-        button('＋ 新增', () => openOptionSheet('tag', '標籤', DEFAULT_TAGS, row.tags), 'chip-btn chip-add')),
-      chooser('道具', chooserOptions(DEFAULT_PROPS, addedOptions('prop'), row.props), row.props, (v) => change(() => toggleIn(row.props, v)), '',
-        button('＋ 新增', () => openOptionSheet('prop', '道具', DEFAULT_PROPS, row.props), 'chip-btn chip-add')),
+      h('div', { class: 'feel-grid' },
+        feelBox('費力', 'effort', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], row.rpe, (v) => change(() => { row.rpe = row.rpe === v ? null : v; }),
+          { className: 'is-wide feel-rpe', chipClass: (v) => `rpe-${effortLevel(v)}` }),
+        pilates && feelBox('品質', 'star', [1, 2, 3, 4, 5], row.quality, (v) => change(() => { row.quality = row.quality === v ? null : v; }), { className: 'feel-even span-3' }),
+        pilates && feelBox('協助', 'hand', ASSIST_LEVELS, row.assist, (v) => change(() => { row.assist = row.assist === v ? null : v; }), { className: 'feel-even span-3' }),
+        h('div', { class: 'feel-box span-2', role: 'group', 'aria-label': '疼痛' },
+          h('div', { class: 'feel-head' }, icon('body'), h('span', {}, '疼痛')),
+          h('div', { class: 'feel-chips' }, button(pains.length ? painText(row) : '記錄疼痛', () => openPainSheet(row), `chip-btn feel-pain${pains.length ? ' is-pain' : ''}`, { 'aria-pressed': pains.length ? 'true' : 'false' }))),
+        feelBox('道具', 'layers', chooserOptions(DEFAULT_PROPS, addedOptions('prop'), row.props), row.props, (v) => change(() => toggleIn(row.props, v)),
+          { className: 'span-4', extra: button('＋', () => openOptionSheet('prop', '道具', DEFAULT_PROPS, row.props), 'chip-btn chip-add', { 'aria-label': '新增道具' }) }),
+        feelBox('備註', 'tag', chooserOptions(DEFAULT_TAGS, addedOptions('tag'), row.tags), row.tags, (v) => change(() => toggleIn(row.tags, v)),
+          { className: 'is-wide feel-tags', extra: button('＋ 新增', () => openOptionSheet('tag', '備註標籤', DEFAULT_TAGS, row.tags), 'chip-btn chip-add') })),
       next !== -1 && h('button', { type: 'button', class: 'btn big primary pinned', onclick: () => tapRow(next) }, `下一個：${session.rows[next].name}`, icon('arrow')),
       next === -1 && isAllDone() && h('button', { type: 'button', class: 'btn big primary pinned', onclick: () => openFinishSheet() }, session.status === 'done' ? '更新完成' : '完成上課', icon('arrow')),
     ];
@@ -632,6 +639,7 @@ export function recordView({ studentId, kind }) {
       const [top, ...parts] = mode === 'feel' ? feelTab() : setTab();
       body.append(...parts.filter(Boolean));
       panel.replaceChildren(top, body);
+      if (mode === 'feel') fitFeel(body.querySelector('.feel-grid'));
     } else {
       body.append(h('div', { class: 'stack' },
         button('加入動作', openPicker, 'big primary')));
@@ -641,6 +649,15 @@ export function recordView({ studentId, kind }) {
     panel.scrollTop = changed ? 0 : previousScroll;
     drawnMode = mode;
     bumped = null;
+  }
+
+  /** When the exercise list is long, the boxes get tighter and the 備註 tags slide sideways, so nothing needs scrolling. */
+  function fitFeel(grid) {
+    if (!grid) return;
+    for (const level of ['is-tight', 'is-tighter']) {
+      if (panel.scrollHeight <= panel.clientHeight + 1) return;
+      grid.classList.add(level);
+    }
   }
 
   function openPicker() {
@@ -790,9 +807,10 @@ export function recordView({ studentId, kind }) {
           canvas.el),
         h('div', { class: 'stack' },
           button('儲存紀錄', () => finish(canvas.isEmpty() ? null : canvas.toDataUrl()), 'big primary'),
+          button('儲存，給學生看今天的報告', () => finish(canvas.isEmpty() ? null : canvas.toDataUrl(), true), ''),
           button('先不簽，稍後補', () => finish(null), 'ghost')));
 
-      function finish(signature) {
+      function finish(signature, showReport = false) {
         session.coachSigned = true;
         session.studentSignature = signature;
         finishSession(session);
@@ -800,6 +818,7 @@ export function recordView({ studentId, kind }) {
         close();
         toast(`${student.name} 的紀錄已儲存`);
         home();
+        if (showReport) go('report', { studentId, sessionId: session.id });
       }
     });
   }

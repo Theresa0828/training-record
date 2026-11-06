@@ -9,6 +9,7 @@ import { planView } from './plan.js';
 import { libraryView } from './library.js';
 import { settingsView, paletteId } from './settings.js';
 import { studentsView } from './students.js';
+import { reportView } from './report.js';
 
 // A button that fails must say so. Silence looks like the tap never landed.
 function reportFailure(reason) {
@@ -31,6 +32,7 @@ async function boot() {
   registerView('library', libraryView);
   registerView('students', studentsView);
   registerView('settings', settingsView);
+  registerView('report', reportView);
   go('today');
 
   store.onSaveError(() => toast('這台裝置暫時存不了資料，App 會自動再試。請先不要關閉 App，也確認 iPad 還有儲存空間。'));
