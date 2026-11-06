@@ -3,9 +3,10 @@ import { h, button, holdButton, backButton, go, back, home, openSheet, confirmSh
 import * as store from './store.js';
 import { classNumberSheet, nextDateSheet } from './classinfo.js';
 import {
-  dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, recentPain, headline, learnedSummary, pilatesLevel,
-  weightTrends, painSeries, overallStatus, bodyCompSummary,
+  dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, recentPain, learnedSummary, pilatesLevel,
+  weightTrends, painSeries, overallStatus, bodyCompSummary, painList, painText, setPainMap,
 } from './core.js';
+import { openPainSheet, painScores } from './painsheet.js';
 import { exportPdf } from './print.js';
 import { icon } from './icons.js';
 import { trendChart } from './trend.js';
@@ -25,6 +26,28 @@ function editProfileSheet(student) {
     goal.value = student.goal || '';
     const contra = h('textarea', { class: 'input', 'aria-label': '疼痛與禁忌' });
     contra.value = student.contraindications || '';
+    const current = () => store.get('students', student.id) || student;
+    const painButton = h('button', { type: 'button', class: 'btn list-item pain-pick' });
+    const paintPain = () => {
+      const pain = current().pain;
+      const marked = painList(pain || {}).length > 0;
+      painButton.classList.toggle('is-marked', marked);
+      painButton.replaceChildren(icon('people'), h('span', {}, marked ? `人體圖：${painText(pain)}` : '在人體圖標出疼痛部位'));
+    };
+    painButton.addEventListener('click', () => openPainSheet('學生資料：疼痛部位', {
+      scores: painScores(current().pain),
+      note: current().pain?.painNote,
+      notePlaceholder: '例如：久坐後下背痛、上樓梯右膝痛',
+      onScores: (map) => {
+        const pain = { ...(current().pain || {}) };
+        setPainMap(pain, map);
+        store.save('students', { ...current(), pain });
+        paintPain();
+      },
+      onNote: (value) => store.save('students', { ...current(), pain: { ...(current().pain || {}), painNote: value } }),
+      onDone: paintPain,
+    }));
+    paintPain();
     const notes = h('textarea', { class: 'input', 'aria-label': '下次要注意的事' });
     notes.value = student.nextNotes || '';
     const others = store.all('students').filter((s) => s.id !== student.id);
@@ -33,13 +56,13 @@ function editProfileSheet(student) {
       h('div', { class: 'stepper-label' }, '姓名'), name,
       h('div', { class: 'stepper-label' }, '日曆上的其他寫法（用、分開）'), aliases,
       h('div', { class: 'stepper-label' }, '訓練目標'), goal,
-      h('div', { class: 'stepper-label' }, '疼痛與禁忌'), contra,
+      h('div', { class: 'stepper-label' }, '疼痛與禁忌'), contra, painButton,
       h('div', { class: 'stepper-label' }, '下次要注意的事'), notes,
       button('儲存', () => {
         const nextName = name.value.trim();
         if (!nextName) { toast('姓名不可空白'); return; }
         store.save('students', {
-          ...student,
+          ...current(),
           name: nextName,
           aliases: aliases.value.split(/[、,，]/).map((a) => a.trim()).filter(Boolean),
           goal: goal.value,
@@ -109,16 +132,26 @@ function card(span, title, iconName, onclick, body, className = '') {
     body);
 }
 
-/** A short headline from free text, with the rest in small type. A tap shows all of it. */
+/** Fits the whole text in one size: 20 when it fits, else 16 for all of it. Only past that does it end in "…". */
+function fitText(el) {
+  requestAnimationFrame(() => {
+    if (!el.isConnected) return;
+    el.classList.remove('is-small');
+    if (el.scrollHeight > el.clientHeight + 1) el.classList.add('is-small');
+  });
+}
+
+/** Free text read in one go, every word the same size. A tap shows all of it. */
 function textCard(student, span, title, iconName, value, emptyText, className = '') {
-  const { head, rest } = headline(value);
   const open = value
     ? () => openSheet(title, (close) => h('div', { class: 'stack' },
       h('p', { class: 'contra' }, value),
       button('編輯資料', () => { close(); editProfileSheet(student); }, '')))
     : () => editProfileSheet(student);
+  const text = value && h('span', { class: 'card-full' }, value.trim());
+  if (text) fitText(text);
   return card(span, title, iconName, open, value
-    ? h('span', { class: 'card-text' }, h('span', { class: 'card-head' }, head), rest && h('span', { class: 'card-rest card-more' }, rest))
+    ? h('span', { class: 'card-text' }, text)
     : h('span', { class: 'card-text' }, h('span', { class: 'card-empty' }, emptyText)), value ? className : '');
 }
 
@@ -207,12 +240,17 @@ const PAIN_WORDS = { up: '上升', down: '下降', same: '持平' };
 
 /** The latest score of every part that hurt lately, drawn on the body. Parts back to 0 are left plain. */
 function painFigure(series, readOnly) {
+  return scoreFigure(Object.fromEntries(series.filter((item) => item.latest > 0 && item.part !== '未標部位').map((item) => [item.part, item.latest])), readOnly);
+}
+
+function scoreFigure(scores, readOnly) {
   const map = bodyMap(() => {}, { readOnly });
-  map.update(Object.fromEntries(series.filter((item) => item.latest > 0 && item.part !== '未標部位').map((item) => [item.part, item.latest])), null);
+  map.update(scores, null);
   return map.el;
 }
 
-function painSheet(history) {
+function painSheet(history, student) {
+  const profile = painList(student.pain || {}).filter((p) => p.part);
   const items = recentPain(history, 12);
   const series = painSeries(history);
   openSheet('疼痛紀錄', () => h('div', { class: 'stack' },
@@ -225,14 +263,30 @@ function painSheet(history) {
     items.length
       ? h('div', { class: 'stack-sm' }, h('div', { class: 'stepper-label' }, '每次紀錄'),
         items.map((p) => h('div', { class: 'history-row' }, h('strong', {}, `${shortDate(p.date)} ${p.exercise}`), h('div', {}, p.text), p.note && h('div', { class: 'muted small' }, p.note))))
-      : h('p', { class: 'muted' }, '最近沒有疼痛紀錄。')), { wide: true });
+      : h('p', { class: 'muted' }, '最近沒有上課的疼痛紀錄。'),
+    h('div', { class: 'stack-sm' }, h('div', { class: 'stepper-label' }, '學生資料記的疼痛'),
+      profile.length
+        ? h('div', { class: 'pain-sheet-map' }, scoreFigure(painScores(student.pain), true),
+          h('div', {}, h('p', {}, painText(student.pain)), student.pain.painNote && h('p', { class: 'muted small' }, student.pain.painNote)))
+        : h('p', { class: 'muted' }, '還沒標。'),
+      button(profile.length ? '修改學生資料的疼痛' : '在人體圖標出來', () => editProfileSheet(student), ''))), { wide: true });
 }
 
-function painCard(history) {
+function painCard(history, student) {
   const series = painSeries(history);
   const sore = series.filter((item) => item.latest > 0);
-  return card('span-3', '疼痛變化', null, () => painSheet(history),
-    series.length
+  const profile = painList(student.pain || {}).filter((p) => p.part);
+  const fromProfile = !series.length && profile.length > 0;
+  return card('span-3', '疼痛變化', null, () => painSheet(history, student),
+    fromProfile
+      ? h('span', { class: 'pain-card' },
+        scoreFigure(painScores(student.pain), true),
+        h('span', { class: 'pain-list' },
+          profile.slice(0, 3).map((item) => h('span', { class: 'pain-item' },
+            h('span', { class: 'pain-part' }, item.part),
+            h('span', { class: 'pain-score' }, item.score === null ? '—' : `${item.score} 分`))),
+          h('span', { class: 'muted small' }, '學生資料記的')))
+    : series.length
       ? h('span', { class: 'pain-card' },
         painFigure(series, true),
         h('span', { class: 'pain-list' },
@@ -242,7 +296,7 @@ function painCard(history) {
             h('span', { class: 'muted small' }, PAIN_WORDS[item.direction]))),
           series.length > 3 && h('span', { class: 'muted small' }, `共 ${series.length} 個部位`)))
       : h('span', { class: 'pain-none' }, icon('check'), h('span', { class: 'card-head' }, history.length ? '沒有疼痛' : '尚無紀錄')),
-    sore.length ? 'is-alert' : '');
+    sore.length || fromProfile ? 'is-alert' : '');
 }
 
 const BODY_FIELDS = [['weight', '體重', 'kg', 400], ['fat', '體脂', '%', 80], ['muscle', '肌肉量', 'kg', 200]];
@@ -339,7 +393,7 @@ export function overviewView({ studentId }) {
       termCard(studentId, todaySession, count),
       nextCard(student),
       learnedCard(history, 'span-3'),
-      painCard(history),
+      painCard(history, student),
       statusCard(history, pilatesOnly ? 'span-3' : 'span-2'),
       !pilatesOnly && weightCard(history, 'span-2'),
       bodyCard(student, pilatesOnly ? 'span-3' : 'span-2')),

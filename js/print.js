@@ -1,7 +1,7 @@
 // Lays sessions out like the MRE005 paper form: three classes a page, eight rows, five sets.
 import { toast } from './dom.js';
 import * as store from './store.js';
-import { MAX_SETS, rowDetails, setLoad } from './core.js';
+import { MAX_SETS, painText, rowDetails, setLoad } from './core.js';
 import { call, isConnected } from './sync.js';
 
 const PER_PAGE = 3;
@@ -52,7 +52,7 @@ function sessionHtml(session, coachName, coachSignature) {
 <colgroup><col class="col-name">${'<col class="col-sub">'.repeat(MAX_SETS * 2)}<col class="col-note"><col class="col-note"></colgroup>
 <tr class="head"><td class="label">日期</td><td colspan="3">${y} / ${m} / ${d}</td><td class="label">血壓</td><td colspan="3">${escapeHtml(session.bpSys)} / ${escapeHtml(session.bpDia)} mmHg</td><td class="label">心跳</td><td colspan="2">${escapeHtml(session.hr)} bpm</td><td class="label">簽名</td>
 <td class="signs">${coach ? `<img src="${coach}" alt="教練簽名">` : escapeHtml(session.coachSigned ? coachName : '')}${studentSign ? `<img src="${studentSign}" alt="學生簽名">` : ''}</td></tr>
-<tr><td class="label">狀況</td><td colspan="12">${flag('pain', '疼痛')} ${flag('sleep', '睡眠')} ${flag('diet', '飲食')} ${flag('mood', '心情')} ${session.special ? '☑' : '☐'}特殊狀況：${escapeHtml(session.special)}</td></tr>
+<tr><td class="label">狀況</td><td colspan="12">${flag('pain', session.dayPain && painText(session.dayPain) ? `疼痛（${escapeHtml(painText(session.dayPain))}）` : '疼痛')} ${flag('sleep', '睡眠')} ${flag('diet', '飲食')} ${flag('mood', '心情')} ${session.special ? '☑' : '☐'}特殊狀況：${escapeHtml(session.special)}</td></tr>
 <tr class="head"><td class="name-head" colspan="1">動作</td><td colspan="2">（一）</td><td colspan="2">（二）</td><td colspan="2">（三）</td><td colspan="2">（四）</td><td colspan="2">（五）</td><td colspan="2">備註</td></tr>
 ${rowsHtml(session).replaceAll('class="note" rowspan', 'class="note" colspan="2" rowspan')}
 </table>`;

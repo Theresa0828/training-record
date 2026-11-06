@@ -12,7 +12,7 @@ import { classNumberSheet, nextDateControl, nextDateSheet, nextDateText } from '
 import { springEditor as springControls } from './spring.js';
 import { numberSheet } from './numpad.js';
 import { icon } from './icons.js';
-import { bodyMap } from './bodymap.js';
+import { openPainSheet as openPainMap, painScores } from './painsheet.js';
 import { trendChart } from './trend.js';
 import { dragHandle } from './sortable.js';
 import { termRing } from './charts.js';
@@ -321,7 +321,8 @@ export function recordView({ studentId, kind }) {
         : (previous?.bpSys ? `上次 ${previous.bpSys}/${previous.bpDia}` : '未量')));
     vitalsHr.replaceChildren(h('span', { class: 'vital-label' }, '心跳'),
       h('span', { class: 'vital-value' }, session.hr || (previous?.hr ? `上次 ${previous.hr}` : '未量')));
-    const marked = STATUS_FLAGS.filter(([key]) => session.flags[key]).map(([, label]) => label);
+    const marked = STATUS_FLAGS.filter(([key]) => session.flags[key])
+      .map(([key, label]) => (key === 'pain' && painList(session.dayPain || {}).length ? `疼痛 ${painShort(session.dayPain)}` : label));
     vitalsFlags.classList.toggle('is-marked', marked.length > 0);
     vitalsFlags.replaceChildren(h('span', { class: 'vital-label' }, '今天狀況'),
       h('span', { class: 'vital-value' }, marked.length ? marked.join('、') : '都正常'));
@@ -560,22 +561,24 @@ export function recordView({ studentId, kind }) {
           onclick: () => { index = i; typed = ''; draw(); },
         }, h('span', { class: 'stepper-label' }, label), h('span', { class: 'vital-value' }, i === index && typed ? typed : (session[key] || '—'))))),
         h('div', { class: 'keypad' },
-          [1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => key(String(d))),
+          [1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map((d) => key(String(d))),
           button('清除', () => {
             typed = '';
             mutate(() => { session[fields[index][2]] = null; });
             paintVitals();
             draw();
           }, 'key'),
-          key('0'),
           button(session.bpSys || session.hr ? '量好了' : '先跳過', () => setMode('set'), 'key primary')),
         h('div', { class: 'field' },
           h('div', { class: 'stepper-label' }, '今天狀況（有問題才點）'),
-          h('div', { class: 'chips chips-4' }, STATUS_FLAGS.map(([flag, label]) => button(label, () => {
-            mutate(() => { session.flags[flag] = !session.flags[flag]; });
-            paintVitals();
-            draw();
-          }, 'chip-btn', { 'aria-pressed': session.flags[flag] ? 'true' : 'false' })))));
+          h('div', { class: 'chips chips-4' }, STATUS_FLAGS.map(([flag, label]) => (flag === 'pain'
+            ? button(painList(session.dayPain || {}).length ? `疼痛 ${painShort(session.dayPain)}` : label, () => openDayPain(draw),
+              `chip-btn${session.flags.pain ? ' is-pain' : ''}`, { 'aria-pressed': session.flags.pain ? 'true' : 'false' })
+            : button(label, () => {
+              mutate(() => { session.flags[flag] = !session.flags[flag]; });
+              paintVitals();
+              draw();
+            }, 'chip-btn', { 'aria-pressed': session.flags[flag] ? 'true' : 'false' }))))));
     }
 
     function key(digit) {
@@ -669,55 +672,32 @@ export function recordView({ studentId, kind }) {
   }
 
   function openPainSheet(row) {
-    const scores = Object.fromEntries(painList(row).filter((p) => p.part).map((p) => [p.part, p.score]));
-    let active = Object.keys(scores).at(-1) || null;
-    const save = () => mutate(() => setPainMap(row, { ...scores }));
-    openSheet(`疼痛：${row.name}`, (close) => {
-      const picked = h('div', { class: 'body-picked' });
-      const keypad = h('div', {});
-      const remove = (part) => {
-        const score = scores[part];
-        delete scores[part];
-        active = Object.keys(scores).at(-1) || null;
-        save();
-        draw();
-        toast(`已移除 ${part}`, { label: '復原', run: () => { scores[part] = score; active = part; save(); draw(); } });
-      };
-      // The first tap marks a part and a tap on another marked part moves to it. Taking one off needs the held button.
-      const tapPart = (part) => {
-        if (part === active) return;
-        if (!(part in scores)) {
-          scores[part] = null;
-          save();
-        }
-        active = part;
-        draw();
-      };
-      const map = bodyMap(tapPart);
-      const note = h('textarea', { class: 'input pain-note', placeholder: '例如：下蹲到底才痛、刺痛', 'aria-label': '疼痛附註', oninput: () => {
-        row.painNote = note.value;
-        store.save('sessions', session);
-      } });
-      note.value = row.painNote || '';
-      const draw = () => {
-        map.update(scores, active);
-        picked.replaceChildren(...(Object.keys(scores).length
-          ? Object.entries(scores).map(([part, score]) => button(score === null ? part : `${part} ${score}`, () => { active = part; draw(); }, 'chip-btn', { 'aria-pressed': part === active ? 'true' : 'false' }))
-          : [h('p', { class: 'muted' }, '點圖上會痛的地方，再選分數')]));
-        keypad.replaceChildren(active ? h('div', { class: 'field' },
-          h('div', { class: 'row-between' },
-            h('div', { class: 'pain-target' }, `${active} 的疼痛分數`),
-            holdButton('移除這個部位', () => remove(active), 'ghost danger-text')),
-          h('div', { class: 'chips chips-11' }, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((value) => button(String(value), () => {
-            scores[active] = value;
-            save();
-            draw();
-          }, 'chip-btn', { 'aria-pressed': scores[active] === value ? 'true' : 'false' })))) : '');
-      };
-      draw();
-      return h('div', { class: 'stack' }, map.el, picked, keypad,
-        h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '疼痛附註'), note),
-        button('完成', () => { close(); refresh(); }, 'big primary'));
+    openPainMap(`疼痛：${row.name}`, {
+      scores: painScores(row),
+      note: row.painNote,
+      onScores: (map) => mutate(() => setPainMap(row, map)),
+      onNote: (value) => { row.painNote = value; store.save('sessions', session); },
+      onDone: refresh,
+    });
+  }
+
+  /** How the student feels on arrival: the 疼痛 check opens the body map, and the check stays on while a part is marked. */
+  function openDayPain(after) {
+    openPainMap('今天上課前的疼痛', {
+      scores: painScores(session.dayPain),
+      note: session.dayPain?.painNote,
+      notePlaceholder: '例如：早上起床下背緊、走路膝蓋痛',
+      onScores: (map) => {
+        mutate(() => {
+          session.dayPain = { ...(session.dayPain || {}) };
+          setPainMap(session.dayPain, map);
+          session.flags.pain = Object.keys(map).length > 0;
+        });
+        paintVitals();
+        after();
+      },
+      onNote: (value) => { session.dayPain = { ...(session.dayPain || {}), painNote: value }; store.save('sessions', session); },
+      onDone: after,
     });
   }
 

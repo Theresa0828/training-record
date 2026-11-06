@@ -469,6 +469,13 @@ export function painList(row) {
   return row.painScore ? [{ part: '', score: row.painScore }] : [];
 }
 
+export const DAY_PAIN = '上課前';
+
+/** Where a class holds pain: how the student felt on arrival, then each exercise. */
+export function painSources(session) {
+  return [...(session.dayPain ? [session.dayPain] : []), ...(session.rows || [])];
+}
+
 /** Stores the per-part scores and keeps the summary fields in step. */
 export function setPainMap(row, map) {
   row.painMap = map;
@@ -520,9 +527,9 @@ export function exerciseHistory(exerciseId, history) {
 export function recentPain(history, limit = 5) {
   const items = [];
   for (const session of history.slice(0, limit)) {
-    for (const row of session.rows) {
+    for (const row of painSources(session)) {
       if (painList(row).length) {
-        items.push({ date: session.date, exercise: row.name, text: painText(row), note: row.painNote || '' });
+        items.push({ date: session.date, exercise: row.name || DAY_PAIN, text: painText(row), note: row.painNote || '' });
       }
     }
   }
@@ -704,7 +711,7 @@ export function painSeries(history, limit = 8) {
   const sessions = history.slice(0, limit).reverse();
   const parts = new Map();
   sessions.forEach((session, index) => {
-    for (const row of session.rows) {
+    for (const row of painSources(session)) {
       for (const { part, score } of painList(row)) {
         const name = part || '未標部位';
         if (!parts.has(name)) parts.set(name, new Array(sessions.length).fill(0));

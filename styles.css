@@ -803,3 +803,10 @@ button.stat-card:active { transform: scale(.985); }
 @media (min-width: 641px) {
   .grid-name-text.is-long { font-size: 13px; line-height: 1.12; -webkit-line-clamp: 3; }
 }
+
+/* v10. Text cards show every word in one size; pain check-ins open the body map. */
+.card-full { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font-size: 20px; font-weight: 500; line-height: 1.4; white-space: pre-line; }
+.card-full.is-small { -webkit-line-clamp: 4; font-size: 16px; line-height: 1.45; }
+.chip-btn.is-pain[aria-pressed="true"] { background: var(--alert-soft); color: var(--on-alert-soft); border-color: var(--alert); }
+.pain-pick { justify-content: flex-start; gap: 8px; }
+.pain-pick.is-marked { background: var(--alert-soft); color: var(--on-alert-soft); }

@@ -1,6 +1,6 @@
 // How a past class is shown: on the overview's list and beside the plan for reference.
 import { h } from './dom.js';
-import { classLabel, isBpFlagged, rowDetails, setText } from './core.js';
+import { classLabel, isBpFlagged, painText, rowDetails, setText } from './core.js';
 import { kindLabel } from './today.js';
 import { icon } from './icons.js';
 
@@ -29,7 +29,8 @@ export function sessionFacts(session) {
     session.bpSys ? `血壓 ${session.bpSys}/${session.bpDia}${isBpFlagged(session.bpSys, session.bpDia) ? ' 偏高' : ''}` : '',
     session.hr ? `心跳 ${session.hr}` : '',
   ].filter(Boolean).join('・');
-  const flags = Object.entries(FLAG_NAMES).filter(([key]) => session.flags?.[key]).map(([, name]) => name);
+  const flags = Object.entries(FLAG_NAMES).filter(([key]) => session.flags?.[key])
+    .map(([key, name]) => (key === 'pain' && session.dayPain && painText(session.dayPain) ? `疼痛（${painText(session.dayPain)}）` : name));
   return [
     vitals && h('p', { class: 'muted' }, vitals),
     flags.length > 0 && h('p', {}, `當天狀況：${flags.join('、')}`),
