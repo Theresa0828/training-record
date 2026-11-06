@@ -731,24 +731,111 @@ export function painSeries(history, limit = 8) {
 }
 
 /** One word for how training is going. The rules are simple on purpose, so the teacher can check them. */
-export function overallStatus(history) {
-  if (!history.length) return { tone: 'none', label: '尚無紀錄', detail: '上完第一堂就會顯示' };
-  if (history.length < 2) return { tone: 'none', label: '剛開始', detail: '再上一堂就能比較' };
-  const rising = painSeries(history).find((item) => item.direction === 'up');
-  if (rising) return { tone: 'alert', label: '需留意', detail: `${rising.part}疼痛增加` };
+// Rules in docs/整體狀態判斷.md. Change that file first; when they disagree, the file wins.
+export const STATUS_RULES = { painRise: 1, bpClasses: 2, rpeHigh: 8, absentDays: 21, rpeEasier: 1 };
+
+function daysBetween(from, to) {
+  const [a, b] = [from, to].map((key) => { const [y, m, d] = key.split('-').map(Number); return Date.UTC(y, m - 1, d); });
+  return Math.round((b - a) / 86400000);
+}
+
+function maxDoneWeight(row) {
+  const done = row.sets.filter((s) => s.done);
+  return done.length ? Math.max(...done.map((s) => s.weight)) : null;
+}
+
+/** What the teacher wrote about an exercise in one class: its 備註 tags and the pain note. */
+function rowNotes(row) {
+  return [...(row.tags || []), row.painNote].map((text) => String(text || '').trim()).filter(Boolean);
+}
+
+/** Strength exercises done at the same weight as the class before, but felt easier by at least one RPE point. */
+function easierCount(history) {
+  const [latest, ...older] = history;
+  let count = 0;
+  for (const row of latest.rows) {
+    if (row.kind !== 'strength' || !row.rpe) continue;
+    const weight = maxDoneWeight(row);
+    if (weight === null) continue;
+    for (const session of older) {
+      const before = session.rows.find((r) => r.exerciseId === row.exerciseId);
+      if (!before) continue;
+      if (before.rpe && (before.equipment || '') === (row.equipment || '') && maxDoneWeight(before) === weight
+        && before.rpe - row.rpe >= STATUS_RULES.rpeEasier) count += 1;
+      break;
+    }
+  }
+  return count;
+}
+
+/**
+ * The overview's one-glance status. history is newest first.
+ * Returns the label and short detail for the card, plus every reason found, for the sheet behind it.
+ */
+export function overallStatus(history, today = dateKey()) {
+  if (!history.length) return { tone: 'none', label: '尚無紀錄', detail: '上完第一堂就會顯示', reasons: [], notes: [] };
+  const latest = history[0];
+  const alerts = [];
+  const gains = [];
+
+  // Things to watch.
+  const pains = painSeries(history);
+  for (const item of history.length > 1 ? pains.filter((p) => p.direction === 'up') : []) alerts.push(`${item.part}疼痛增加`);
+  const bp = history.slice(0, STATUS_RULES.bpClasses);
+  if (bp.length === STATUS_RULES.bpClasses && bp.every((s) => s.bpSys && s.bpDia && isBpFlagged(s.bpSys, s.bpDia))) {
+    alerts.push(`血壓連續 ${STATUS_RULES.bpClasses} 堂偏高（${latest.bpSys}/${latest.bpDia}）`);
+  }
+  const rpes = latest.rows.map((row) => row.rpe).filter(Boolean);
+  const rpeAverage = rpes.length ? Math.round((rpes.reduce((a, b) => a + b, 0) / rpes.length) * 10) / 10 : null;
+  if (rpeAverage !== null && rpeAverage >= STATUS_RULES.rpeHigh) alerts.push(`上次費力偏高（平均 ${rpeAverage}）`);
+  const away = today ? daysBetween(latest.date, today) : 0;
+  if (away >= STATUS_RULES.absentDays) alerts.push(`已 ${away} 天沒上課`);
+
+  if (history.length < 2) {
+    if (alerts.length) return { tone: 'alert', label: '需留意', detail: alerts[0], reasons: alerts.map((text) => ({ tone: 'alert', text })), notes: [] };
+    return { tone: 'none', label: '剛開始', detail: '再上一堂就能比較', reasons: [], notes: [] };
+  }
+
+  // Changes in weight, with what was written about each lighter exercise.
   const trends = weightTrends(history, 99);
-  const heavier = trends.filter((item) => item.change > 0).length;
-  const lighter = trends.filter((item) => item.change < 0).length;
-  if (heavier > lighter) return { tone: 'up', label: '穩定進步', detail: `${heavier} 個動作加重` };
-  if (lighter > heavier) return { tone: 'flat', label: '重量下降', detail: `${lighter} 個動作減輕` };
+  const heavier = trends.filter((item) => item.change > 0);
+  const lighter = trends.filter((item) => item.change < 0);
+  const notes = [];
+  const classNotes = new Map();
+  for (const item of lighter) {
+    // The class the lighter weight came from: the latest one where a set of it was done.
+    const session = history.find((s) => s.rows.some((r) => r.exerciseId === item.id && r.sets.some((set) => set.done)));
+    const row = session?.rows.find((r) => r.exerciseId === item.id);
+    const written = row ? rowNotes(row) : [];
+    if (written.length) notes.push(`${item.name}：${[...new Set(written)].join('、')}`);
+    // The class note is listed once, however many lighter exercises share the class.
+    const note = String(session?.note || '').trim();
+    if (note) classNotes.set(session.date, note);
+  }
+  for (const [date, note] of classNotes) notes.push(`${Number(date.slice(5, 7))}/${Number(date.slice(8))} 上課備註：${note}`);
+  if (heavier.length) gains.push(`${heavier.length} 個動作加重`);
+  const easing = pains.filter((p) => p.direction === 'down');
+  for (const item of easing) gains.push(`${item.part}疼痛下降`);
   const quality = (list) => {
     const scores = list.flatMap((session) => session.rows.map((row) => row.quality)).filter(Boolean);
     return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
   };
   const recent = quality(history.slice(0, 3));
   const older = quality(history.slice(3, 6));
-  if (recent !== null && older !== null && recent > older) return { tone: 'up', label: '穩定進步', detail: '動作品質提升' };
-  return { tone: 'flat', label: '維持穩定', detail: '重量和品質持平' };
+  if (recent !== null && older !== null && recent > older) gains.push('動作品質提升');
+  const easier = easierCount(history);
+  if (easier) gains.push(`${easier} 個動作同重量更輕鬆`);
+  const drop = lighter.length > heavier.length ? `${lighter.length} 個動作減輕` : '';
+
+  const reasons = [
+    ...alerts.map((text) => ({ tone: 'alert', text })),
+    ...(drop ? [{ tone: 'flat', text: drop }] : []),
+    ...gains.map((text) => ({ tone: 'up', text })),
+  ];
+  if (alerts.length) return { tone: 'alert', label: '需留意', detail: alerts[0], reasons, notes };
+  if (drop) return { tone: 'flat', label: '重量下降', detail: drop, reasons, notes };
+  if (gains.length) return { tone: 'up', label: '穩定進步', detail: gains[0], reasons, notes };
+  return { tone: 'flat', label: '維持穩定', detail: '重量和品質持平', reasons, notes };
 }
 
 export const BODY_COMP_DAYS = 90;

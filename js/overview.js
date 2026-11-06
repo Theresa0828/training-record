@@ -183,12 +183,24 @@ function nextCard(student) {
 function statusCard(history, span) {
   const status = overallStatus(history);
   const iconName = status.tone === 'up' ? 'up' : status.tone === 'alert' ? 'warn' : 'flat';
-  return h('section', { class: `stat-card rise ${span} status-${status.tone}` },
-    h('span', { class: 'card-title' }, h('span', {}, '整體狀態')),
-    h('span', { class: 'status-body' },
-      h('span', { class: 'status-mark' }, icon(iconName)),
-      h('span', { class: 'card-head' }, status.label),
-      h('span', { class: 'card-rest' }, status.detail)));
+  const more = status.reasons.length > 1 || status.notes.length > 0;
+  return card(span, '整體狀態', null, () => statusSheet(status), h('span', { class: 'status-body' },
+    h('span', { class: 'status-mark' }, icon(iconName)),
+    h('span', { class: 'card-head' }, status.label),
+    h('span', { class: 'card-rest' }, status.notes[0] || status.detail),
+    more && h('span', { class: 'status-more' }, status.notes[0] ? status.detail : `還有 ${status.reasons.length - 1} 項`)), `status-${status.tone}`);
+}
+
+/** Every reason behind the status, so the teacher can see why. */
+function statusSheet(status) {
+  const marks = { alert: 'warn', up: 'up', flat: 'flat' };
+  openSheet(`整體狀態：${status.label}`, () => h('div', { class: 'stack' },
+    status.reasons.length
+      ? h('ul', { class: 'status-list' }, status.reasons.map((item) => h('li', { class: `status-${item.tone}` }, icon(marks[item.tone]), h('span', {}, item.text))))
+      : h('p', { class: 'muted' }, status.detail),
+    status.notes.length > 0 && h('div', { class: 'field' },
+      h('div', { class: 'stepper-label' }, '減輕的動作當時的備註'),
+      status.notes.map((text) => h('p', {}, text)))));
 }
 
 function learnedSheet(summary) {

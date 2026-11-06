@@ -937,3 +937,11 @@ button.stat-card:active { transform: scale(.985); }
   .feel-grid > .feel-box { grid-column: 1 / -1; }
   .feel-rpe .feel-chips { grid-auto-flow: row; grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }
+
+/* 整體狀態: the reasons behind the label. */
+.status-more { font-size: 13px; color: var(--muted); }
+.status-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.status-list li { display: flex; align-items: center; gap: 10px; font-size: 16px; }
+.status-list .icon { width: 22px; height: 22px; flex: none; color: var(--muted); }
+.status-list .status-alert { color: var(--alert); }
+.status-list .status-alert .icon { color: var(--alert); }
