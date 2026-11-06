@@ -7,7 +7,7 @@ export const APPARATUS = ['Reformer', 'Cadillac', 'Chair', 'Mat', 'Arc Barrel', 
 export const ASSIST_LEVELS = ['無', '少', '中', '多'];
 export const SPRING_COLORS = ['r', 'b', 'y', 'g'];
 export const SPRING_BARS = ['l', 'm', 'h'];
-export const EQUIPMENT = ['啞鈴', '槓鈴', '壺鈴', '彈力帶'];
+export const EQUIPMENT = ['啞鈴', '槓鈴', '壺鈴', '彈力帶', '六角槓', '藥球', '地雷管'];
 export const BAND = '彈力帶';
 export const BAND_COLORS = ['黃', '紅', '綠', '藍', '黑'];
 export const BODY_GROUPS = ['下肢', '胸', '背', '肩', '手臂', '核心'];
@@ -137,7 +137,7 @@ export function rowMetTarget(row) {
  * Strength only. Suggests a heavier load after two sessions in a row met the plan,
  * unless the latest one recorded any pain. The teacher always decides whether to use it.
  */
-export function suggestProgression(exerciseId, history, step = 2.5) {
+export function suggestProgression(exerciseId, history, step = 2) {
   const rows = [];
   for (const session of history) {
     const row = session.rows.find((r) => r.exerciseId === exerciseId);

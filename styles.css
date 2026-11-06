@@ -420,10 +420,6 @@ textarea.input { min-height: 96px; resize: vertical; }
 .trend-hit:focus-visible { outline: none; stroke: var(--next); stroke-width: 2; }
 .trend-readout { font-size: 16px; font-variant-numeric: tabular-nums; }
 .plan-row { background: var(--surface); border-radius: 24px; padding: 14px 16px; box-shadow: var(--card-shadow); }
-.plan-controls { display: flex; flex-wrap: wrap; gap: 10px 20px; }
-.plan-control { display: flex; align-items: center; gap: 6px; }
-.plan-control .stepper-value { min-width: 64px; font-size: 20px; font-weight: 700; }
-.plan-control .step { width: 52px; }
 .suggestion { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: var(--next-soft); padding: 6px 12px; border-radius: 14px; }
 .suggestion span { flex: 1 1 180px; }
 .settings-card { background: var(--surface); border-radius: 24px; padding: 16px 18px; box-shadow: var(--card-shadow); }
@@ -648,3 +644,33 @@ button.stat-card:active { transform: scale(.985); }
 .term-piece.is-done, .learn-fill, .quality-dot.is-on { --mark: color-mix(in srgb, var(--done) 65%, var(--fg)); }
 .term-piece.is-done { stroke: var(--mark); }
 .learn-fill, .quality-dot.is-on { background: var(--mark); }
+
+/* Number boxes: a picture and a name on top, then minus, the value and plus. Minus is an outline, plus is filled. */
+.param-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.param { display: grid; gap: 6px; min-width: 0; padding: 10px 12px 12px; background: var(--bg); border-radius: 18px; box-shadow: inset 0 0 0 1px var(--line); }
+.param-head { display: flex; align-items: center; gap: 6px; color: var(--fg); font-size: 16px; font-weight: 500; }
+.param-head .icon { width: 22px; height: 22px; color: var(--muted); }
+.param-controls { display: flex; align-items: center; gap: 8px; }
+.param-value { flex: 1 1 auto; display: flex; align-items: baseline; justify-content: center; gap: 2px; min-width: 64px; min-height: 56px; padding: 0 4px; line-height: 56px; font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.param-value small { font-size: 13px; font-weight: 400; color: var(--muted); }
+.param-value.bump { animation: bump .2s var(--spring); }
+.btn.param-step { flex: none; width: 56px; min-width: 56px; min-height: 56px; padding: 0; border-radius: 16px; font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.btn.param-step.is-minus { background: var(--surface); box-shadow: inset 0 0 0 2px var(--line-strong); }
+.btn.param-step.is-plus { background: var(--next-soft); color: var(--primary-text); box-shadow: none; }
+.btn.param-choice { flex: 1; min-height: 56px; font-size: 20px; font-weight: 700; }
+.panel .param-grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.panel .param-value { font-size: 40px; }
+.panel .btn.param-step { width: 52px; min-width: 52px; min-height: 52px; }
+
+/* Equipment as pictures, because the names look alike. */
+.equip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 6px; }
+.btn.equip-btn { display: grid; justify-items: center; align-content: center; gap: 2px; min-width: 0; min-height: 64px; padding: 6px 2px; font-size: 13px; font-weight: 500; }
+.equip-icon { width: 30px; height: 30px; flex: none; }
+.equip-letter { fill: currentColor; font: 700 15px var(--font); }
+.equip-plus { font-size: 20px; line-height: 30px; }
+.btn.equip-add { background: transparent; color: var(--primary-text); box-shadow: inset 0 0 0 1.5px var(--line); }
+.option-row .equip-icon { width: 24px; height: 24px; }
+@media (max-width: 640px) {
+  .panel .param-value { font-size: 28px; }
+  .btn.param-step { width: 48px; min-width: 48px; }
+}

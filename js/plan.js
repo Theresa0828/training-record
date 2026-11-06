@@ -10,6 +10,7 @@ import { icon } from './icons.js';
 import { dragHandle } from './sortable.js';
 import { equipmentControl } from './equipment.js';
 import { lastClassCard } from './history.js';
+import { paramTile, paramChoice } from './param.js';
 
 function loadPlan(studentId, history) {
   const saved = store.get('plans', studentId);
@@ -75,34 +76,37 @@ export function planView({ studentId }) {
     });
   }
 
-  function step(row, field, delta) {
-    return h('button', {
-      type: 'button',
-      class: 'btn step',
-      'data-repeat': true,
-      'aria-label': `${row.name} ${field === 'weight' ? '重量' : '次數'} ${delta > 0 ? '加' : '減'} ${Math.abs(delta)}`,
-      onclick: () => adjust(row, field, delta),
-    }, `${delta > 0 ? '+' : '−'}${Math.abs(delta)}`);
+  // A plan is set once, so each box has one step each way; any other number is typed by tapping it.
+  function weightTile(row) {
+    const weight = row.sets[0]?.weight || 0;
+    return paramTile({
+      name: row.name, label: '重量', iconName: 'dumbbell', value: weight,
+      text: weight ? String(weight) : '自體', unit: weight ? 'kg' : '',
+      steps: [2], min: 0, className: 'param-weight',
+      onStep: (delta) => adjust(row, 'weight', delta),
+      onTap: () => typeValue(row, 'weight', '重量', 'kg'),
+    });
   }
 
-  function setsControl(row) {
-    return h('div', { class: 'plan-control' },
-      h('span', { class: 'stepper-label' }, '組數'),
-      h('button', {
-        type: 'button',
-        class: 'btn step',
-        disabled: row.sets.length <= 1,
-        'aria-label': `${row.name} 減少一組`,
-        onclick: () => change(() => row.sets.pop()),
-      }, '−'),
-      h('span', { class: 'stepper-value' }, row.sets.length),
-      h('button', {
-        type: 'button',
-        class: 'btn step',
-        disabled: row.sets.length >= MAX_SETS,
-        'aria-label': `${row.name} 增加一組`,
-        onclick: () => change(() => row.sets.push(makeSet(row.sets[row.sets.length - 1] || {}))),
-      }, '+'));
+  function repsTile(row) {
+    const reps = row.sets[0]?.reps ?? 0;
+    return paramTile({
+      name: row.name, label: '次數', iconName: 'repeat', value: reps, unit: '下',
+      steps: [1], min: 0,
+      onStep: (delta) => adjust(row, 'reps', delta),
+      onTap: () => typeValue(row, 'reps', '次數', ''),
+    });
+  }
+
+  function setsTile(row) {
+    return paramTile({
+      name: row.name, label: '組數', iconName: 'layers', value: row.sets.length, unit: '組',
+      steps: [1], min: 1, max: MAX_SETS,
+      onStep: (delta) => change(() => {
+        if (delta < 0) row.sets.pop();
+        else row.sets.push(makeSet(row.sets[row.sets.length - 1] || {}));
+      }),
+    });
   }
 
   function springControl(row) {
@@ -122,8 +126,7 @@ export function planView({ studentId }) {
       paint();
       return area;
     });
-    return h('div', { class: 'plan-control' }, h('span', { class: 'stepper-label' }, '彈簧'),
-      button(row.sets[0]?.spring || '選擇彈簧', open, 'plan-spring', { 'aria-label': `${row.name} 彈簧` }));
+    return paramChoice({ label: '彈簧', iconName: 'spring', text: row.sets[0]?.spring || '選擇', ariaLabel: `${row.name} 彈簧 ${row.sets[0]?.spring || '未選'}，點一下選擇`, onTap: open });
   }
 
   /** Two taps: this button, then the replacement. */
@@ -138,7 +141,6 @@ export function planView({ studentId }) {
   function rowCard(row, index) {
     const suggestion = !dismissed.has(row.id) && row.equipment !== BAND && suggestProgression(row.exerciseId, history);
     const alreadyApplied = suggestion && row.sets[0]?.weight >= suggestion.to;
-    const first = row.sets[0] || {};
     const handle = dragHandle({
       name: row.name,
       index,
@@ -161,21 +163,18 @@ export function planView({ studentId }) {
         h('span', {}, `連續兩次達標，建議 ${suggestion.from} → ${suggestion.to} kg`),
         button('採用', () => change(() => applySuggestion(row, suggestion)), 'primary'),
         button('不用', () => { dismissed.add(row.id); draw(); }, 'ghost')),
-      row.kind === 'strength' && equipmentControl(row, (equipment, band) => change(() => {
-        row.equipment = equipment;
-        row.band = band;
-      })),
-      h('div', { class: 'plan-controls' },
+      row.kind === 'strength' && equipmentControl(row, (equipment, band) => {
+        if (equipment === null) { draw(); return; }
+        change(() => {
+          row.equipment = equipment;
+          row.band = band;
+        });
+      }),
+      h('div', { class: 'param-grid' },
         row.kind === 'pilates' && springControl(row),
-        row.kind === 'strength' && row.equipment !== BAND && h('div', { class: 'plan-control' }, h('span', { class: 'stepper-label' }, '重量'),
-          step(row, 'weight', -2.5), step(row, 'weight', -1),
-          h('button', { type: 'button', class: 'stepper-value value-tap', 'aria-label': `${row.name} 直接輸入重量`, onclick: () => typeValue(row, 'weight', '重量', 'kg') }, first.weight || '自體'),
-          step(row, 'weight', 1), step(row, 'weight', 2.5)),
-        h('div', { class: 'plan-control' }, h('span', { class: 'stepper-label' }, '次數'),
-          step(row, 'reps', -1),
-          h('button', { type: 'button', class: 'stepper-value value-tap', 'aria-label': `${row.name} 直接輸入次數`, onclick: () => typeValue(row, 'reps', '次數', '') }, first.reps ?? '—'),
-          step(row, 'reps', 1)),
-        setsControl(row)));
+        row.kind === 'strength' && row.equipment !== BAND && weightTile(row),
+        repsTile(row),
+        setsTile(row)));
     return rowEl;
   }
 

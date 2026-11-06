@@ -17,6 +17,7 @@ import { trendChart } from './trend.js';
 import { dragHandle } from './sortable.js';
 import { termRing } from './charts.js';
 import { equipmentControl } from './equipment.js';
+import { paramTile } from './param.js';
 
 const SET_NAMES = ['一', '二', '三', '四', '五'];
 const STATUS_FLAGS = [['pain', '疼痛'], ['sleep', '睡眠'], ['diet', '飲食'], ['mood', '心情']];
@@ -393,24 +394,19 @@ export function recordView({ studentId, kind }) {
   }
 
   function stepper(label, value, field, steps, unit) {
-    const make = (delta) => h('button', {
-      type: 'button',
-      class: 'btn step',
-      'data-repeat': true,
-      'aria-label': `${label} ${delta > 0 ? '加' : '減'} ${Math.abs(delta)}`,
-      onclick: () => adjustSet(field, delta),
-    }, `${delta > 0 ? '+' : '−'}${Math.abs(delta)}`);
-    return h('div', { class: 'stepper' },
-      h('div', { class: 'stepper-row' },
-        h('div', { class: 'stepper-label' }, label),
-        make(-steps[1]), make(-steps[0]),
-        h('button', {
-          type: 'button',
-          class: `stepper-value value-tap${bumped === field ? ' bump' : ''}`,
-          'aria-label': `${label} ${value}，點一下直接輸入`,
-          onclick: () => typeSet(field, label, unit),
-        }, value, unit ? h('small', {}, unit) : ''),
-        make(steps[0]), make(steps[1])));
+    const bodyweight = field === 'weight' && !value;
+    return paramTile({
+      label,
+      iconName: field === 'weight' ? 'dumbbell' : 'repeat',
+      value,
+      text: bodyweight ? '自體' : String(value),
+      unit: bodyweight ? '' : unit,
+      steps,
+      min: 0,
+      bump: bumped === field,
+      onStep: (delta) => adjustSet(field, delta),
+      onTap: () => typeSet(field, label, unit),
+    });
   }
 
   function springEditor(row, set) {
@@ -460,6 +456,7 @@ export function recordView({ studentId, kind }) {
           handoutButton(row.exerciseId),
           h('button', { type: 'button', class: 'btn swap-btn', onclick: () => openSwap(selected.row) }, icon('swap'), h('span', {}, '換動作')))),
       row.kind === 'strength' && equipmentControl(row, (equipment, band) => {
+        if (equipment === null) { renderPanel(); return; }
         mutate(() => {
           row.equipment = equipment;
           row.band = band;
@@ -468,8 +465,10 @@ export function recordView({ studentId, kind }) {
         for (let s = 0; s < MAX_SETS; s++) paintCell(selected.row, s);
         renderPanel();
       }),
-      set && (row.kind === 'pilates' ? springEditor(row, set) : row.equipment !== BAND && stepper('重量', set.weight, 'weight', [1, 2.5], 'kg')),
-      set && stepper('次數', set.reps, 'reps', [1, 2]),
+      set && row.kind === 'pilates' && springEditor(row, set),
+      set && h('div', { class: 'param-grid' },
+        row.kind === 'strength' && row.equipment !== BAND && stepper('重量', set.weight, 'weight', [1, 2], 'kg'),
+        stepper('次數', set.reps, 'reps', [1, 2])),
       set && !set.done && h('button', {
         type: 'button',
         class: 'btn big primary pinned',
