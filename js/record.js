@@ -116,8 +116,8 @@ export function recordView({ studentId, kind }) {
   const finishButton = button(session.status === 'done' ? '更新完成' : '完成上課', () => openFinishSheet(), '');
   const classChip = h('button', { type: 'button', class: 'class-chip', onclick: () => classNumberSheet(studentId, session, paintClassInfo) });
   const nextChip = h('button', { type: 'button', class: 'class-chip', onclick: () => nextDateSheet(studentId, paintClassInfo) });
-  const guideText = h('span', { class: 'guide-text', role: 'status' });
-  const guide = h('div', { class: 'guide' }, icon('arrow'), guideText);
+  const guideText = h('span', { class: 'sr-only', role: 'status' });
+  const addButton = h('button', { type: 'button', class: 'grid-add', 'aria-label': '加入動作', onclick: () => openPicker() }, icon('plus'), h('span', { class: 'grid-add-text' }, '加入動作'));
 
   function setMode(next) {
     mode = next;
@@ -263,6 +263,10 @@ export function recordView({ studentId, kind }) {
       const rowEl = h('div', { class: 'grid-row' }, h('div', { class: 'grid-lead' }, handle, name, swap), sets);
       tableBody.append(rowEl);
     });
+    // The list keeps room for every exercise, so the whole class is visible without scrolling.
+    const rowCount = String(Math.max(session.rows.length, 1));
+    tableBody.style.setProperty('--rows', rowCount);
+    tableBody.parentElement?.style.setProperty('--rows', rowCount);
   }
 
   function paintCell(r, s) {
@@ -297,13 +301,15 @@ export function recordView({ studentId, kind }) {
     const row = session.rows[r];
     const { name } = cells[r];
     name.classList.toggle('is-selected', selected?.row === r);
+    name.parentElement?.parentElement?.classList.toggle('is-current', selected?.row === r && mode !== 'vitals');
     const meta = [
       equipmentText(row),
       row.rpe ? `RPE ${row.rpe}` : '',
       painList(row).length ? `痛 ${painShort(row)}` : '',
       row.tags.length ? `${row.tags.length} 標籤` : '',
     ].filter(Boolean).join('・');
-    name.replaceChildren(h('span', { class: 'grid-name-text' }, row.name), meta ? h('span', { class: 'grid-name-meta' }, meta) : '');
+    // Long names get smaller type and a third line rather than being cut off.
+    name.replaceChildren(h('span', { class: `grid-name-text${row.name.length > 26 ? ' is-long' : ''}` }, row.name), meta ? h('span', { class: 'grid-name-meta' }, meta) : '');
   }
 
   function paintVitals() {
@@ -337,18 +343,23 @@ export function recordView({ studentId, kind }) {
     return `現在做 ${row.name} 第${SET_NAMES[selected.set]}組，做完點亮起的格子`;
   }
 
+  /**
+   * The next step is shown, not written: whatever should be tapped now gets the accent ring and a slow pulse.
+   * Blood pressure at the start, the add button in an empty class, the set being done, and 完成上課 at the end.
+   */
   function paintGuide() {
     const allDone = isAllDone();
+    const anyDone = session.rows.some((row) => row.sets.some((s) => s.done));
     finishButton.classList.toggle('primary', allDone);
     finishButton.classList.toggle('is-ready', allDone && session.status !== 'done');
+    const vitalsDue = mode === 'vitals' || (session.status === 'draft' && !session.bpSys && !session.hr && !anyDone);
+    vitalsBp.classList.toggle('is-next', vitalsDue);
+    vitalsHr.classList.toggle('is-next', mode === 'vitals');
+    addButton.classList.toggle('is-next', !session.rows.length && mode !== 'vitals');
     const message = guideMessage();
     if (message !== lastGuide) {
       lastGuide = message;
       guideText.textContent = message;
-      guide.classList.remove('is-new');
-      // Reading a layout value restarts the animation.
-      void guide.offsetWidth;
-      guide.classList.add('is-new');
     }
   }
 
@@ -442,19 +453,24 @@ export function recordView({ studentId, kind }) {
   }
 
   /** Tab one: the numbers for this set, and the button that finishes it. */
+  /** The panel's first line: the exercise, the two tabs, and its own buttons, all on one row to leave room for the list. */
+  function panelTop(row, sub, tools) {
+    return h('div', { class: 'panel-top' },
+      h('div', { class: 'panel-title' }, h('strong', {}, row.name), sub && h('span', { class: 'muted' }, sub)),
+      panelTabs(),
+      tools && h('div', { class: 'panel-tools' }, tools));
+  }
+
   function setTab() {
     const row = session.rows[selected.row];
     const set = row.sets[selected.set];
     const planText = set ? `計畫 ${setLoad(row, set, false)} × ${set.planReps ?? '—'}` : '';
     const open = row.sets.findIndex((s) => !s.done);
     return [
-      h('div', { class: 'panel-head' },
-        h('div', { class: 'panel-title' },
-          h('strong', {}, row.name),
-          set && h('span', { class: 'muted' }, `第${SET_NAMES[selected.set]}組・${planText}`)),
-        h('div', { class: 'row-wrap' },
-          handoutButton(row.exerciseId),
-          h('button', { type: 'button', class: 'btn swap-btn', onclick: () => openSwap(selected.row) }, icon('swap'), h('span', {}, '換動作')))),
+      panelTop(row, set && `第${SET_NAMES[selected.set]}組・${planText}`, [
+        handoutButton(row.exerciseId),
+        h('button', { type: 'button', class: 'btn swap-btn', onclick: () => openSwap(selected.row) }, icon('swap'), h('span', {}, '換動作')),
+      ]),
       row.kind === 'strength' && equipmentControl(row, (equipment, band) => {
         if (equipment === null) { renderPanel(); return; }
         mutate(() => {
@@ -469,18 +485,19 @@ export function recordView({ studentId, kind }) {
       set && h('div', { class: 'param-grid' },
         row.kind === 'strength' && row.equipment !== BAND && stepper('重量', set.weight, 'weight', [1, 2], 'kg'),
         stepper('次數', set.reps, 'reps', [1, 2])),
-      set && !set.done && h('button', {
-        type: 'button',
-        class: 'btn big primary pinned',
-        onclick: () => tapSet(selected.row, selected.set),
-      }, icon('check'), `第${SET_NAMES[selected.set]}組做完了`),
-      set?.done && open !== -1 && h('button', {
-        type: 'button',
-        class: 'btn big primary pinned',
-        onclick: () => { moveOn(selected.row); refresh(); },
-      }, `回到第${SET_NAMES[open]}組`, icon('arrow')),
-      set && h('div', { class: 'panel-actions' },
-        !isRowDone(row) && button('這個動作全部做完', () => {
+      // The one main button and the smaller ones share a row.
+      set && h('div', { class: 'panel-do' },
+        !set.done && h('button', {
+          type: 'button',
+          class: 'btn big primary',
+          onclick: () => tapSet(selected.row, selected.set),
+        }, icon('check'), `第${SET_NAMES[selected.set]}組做完了`),
+        set.done && open !== -1 && h('button', {
+          type: 'button',
+          class: 'btn big primary',
+          onclick: () => { moveOn(selected.row); refresh(); },
+        }, `回到第${SET_NAMES[open]}組`, icon('arrow')),
+        !isRowDone(row) && button('全部做完', () => {
           mutate(() => row.sets.forEach((s) => { s.done = true; }));
           moveOn(selected.row);
           refresh();
@@ -504,7 +521,7 @@ export function recordView({ studentId, kind }) {
     };
     const next = nextOpenRow(selected.row);
     return [
-      h('div', { class: 'panel-head' }, h('strong', {}, row.name), h('span', { class: 'muted' }, '有才點，沒有就跳過')),
+      panelTop(row, '', null),
       chooser('RPE', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], row.rpe, (v) => change(() => { row.rpe = row.rpe === v ? null : v; }), 'chips-10'),
       button(painList(row).length ? `疼痛：${painText(row)}` : '記錄疼痛', () => openPainSheet(row), painList(row).length ? 'alert' : ''),
       row.kind === 'pilates' && chooser('動作品質', [1, 2, 3, 4, 5], row.quality, (v) => change(() => { row.quality = row.quality === v ? null : v; }), 'chips-5'),
@@ -609,12 +626,11 @@ export function recordView({ studentId, kind }) {
       body.append(vitalsPanel());
       panel.replaceChildren(body);
     } else if (selected && session.rows[selected.row]) {
-      const parts = mode === 'feel' ? feelTab() : setTab();
+      const [top, ...parts] = mode === 'feel' ? feelTab() : setTab();
       body.append(...parts.filter(Boolean));
-      panel.replaceChildren(panelTabs(), body);
+      panel.replaceChildren(top, body);
     } else {
       body.append(h('div', { class: 'stack' },
-        h('p', {}, '還沒有動作。加入第一個動作就可以開始記錄。'),
         button('加入動作', openPicker, 'big primary')));
       panel.replaceChildren(body);
     }
@@ -819,21 +835,22 @@ export function recordView({ studentId, kind }) {
         button('總覽', () => go('overview', { studentId }), 'ghost'),
         undoButton,
         finishButton)),
-    guide,
     (student.contraindications || student.nextNotes) && h('div', { class: 'banner' },
       icon('warn'),
       h('div', {},
         student.contraindications && h('p', {}, `禁忌：${student.contraindications}`),
         student.nextNotes && h('p', {}, `注意：${student.nextNotes}`))),
     h('div', { class: 'vitals' }, vitalsBp, vitalsHr, vitalsFlags, noteButton),
+    guideText,
     h('div', { class: 'record-main' },
       h('div', { class: 'grid' },
         h('div', { class: 'grid-head' },
-          h('button', { type: 'button', class: 'grid-add', 'aria-label': '加入動作', onclick: openPicker }, icon('plus'), h('span', { class: 'grid-add-text' }, '加入動作')),
+          addButton,
           SET_NAMES.map((n) => h('span', {}, `第${n}組`))),
         tableBody),
       panel));
 
+  tableBody.parentElement.style.setProperty('--rows', String(Math.max(session.rows.length, 1)));
   refresh();
   return screen;
 }

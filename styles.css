@@ -735,3 +735,71 @@ button.stat-card:active { transform: scale(.985); }
 .stat-card .body-part:not(.is-on) { fill: color-mix(in srgb, var(--line-strong) 45%, var(--surface)); }
 .overview .topbar-actions .btn { padding-inline: 12px; }
 .pain-card .body-side { display: none; }
+
+/* Class screen, v9. No written guide: what to tap next carries the accent ring and pulses.
+   The list keeps a row for every exercise; the panel's top line and its buttons each take one row. */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.vital.is-next, .grid-add.is-next { position: relative; overflow: visible; box-shadow: 0 0 0 2px var(--next), var(--card-shadow); }
+.grid-add.is-next { box-shadow: 0 0 0 2px var(--next); }
+.vital.is-next::after, .grid-add.is-next::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 0 var(--next); animation: beat 1.6s ease-out infinite; pointer-events: none; }
+.grid-row.is-current { background: color-mix(in srgb, var(--next-soft) 55%, transparent); border-radius: 16px; }
+.grid-row { transition: background-color .2s var(--ease); }
+.panel-top { display: grid; grid-template-columns: minmax(0, 1fr) 210px auto; gap: 10px; align-items: center; }
+.panel-top .panel-title { flex: none; display: grid; gap: 0; }
+.panel-top .panel-title strong { font-size: 20px; line-height: 1.25; }
+.panel-top .panel-title .muted { font-size: 13px; }
+.panel-top .panel-tab { min-height: 44px; }
+.panel-tools { display: flex; gap: 6px; align-items: center; }
+.panel-do { display: flex; gap: 8px; align-items: stretch; }
+.panel-do > .btn { flex: 1 1 0; min-width: 0; padding-inline: 8px; }
+.panel-do > .btn.primary { flex: 2.2 1 0; }
+.panel-do .hold-label { flex-direction: column; align-items: center; gap: 0; line-height: 1.2; }
+.vitals { padding-block: 6px; }
+.vital { min-height: 44px; padding-block: 4px; }
+.banner { padding: 6px 14px; line-height: 1.35; }
+@media (min-width: 641px) {
+  .record-main { gap: 10px; }
+  .record-main .grid { padding: 8px 10px; gap: 4px; min-height: 0; flex: 0 1 auto; }
+  .record-main .grid-head { min-height: 28px; }
+  .grid-head, .grid-row { grid-template-columns: minmax(0, 3fr) repeat(5, minmax(0, 1fr)); gap: 5px; }
+  .record-main .grid-body { flex: 1 1 auto; grid-auto-rows: minmax(46px, 60px); gap: 4px; min-height: min(calc(var(--rows, 1) * 50px), 62vh); }
+  .grid-row { min-height: 0; }
+  .cell { min-height: 0; }
+  .grid-handle { width: 34px; min-height: 44px; }
+  .grid-swap { width: 40px; min-height: 44px; }
+  .grid-name { padding: 2px 8px; }
+  .grid-name-text { font-size: 15px; line-height: 1.2; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  .grid-name:not(.is-selected) .grid-name-meta { display: none; }
+  .grid-name-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell span { font-size: 18px; }
+  .cell.is-spring span { font-size: 15px; }
+  .record-main .panel { flex: 0 1 auto; min-height: 0; }
+}
+@media (max-width: 640px) {
+  .panel-top { grid-template-columns: minmax(0, 1fr) auto; }
+  .panel-top .panel-tabs { grid-column: 1 / -1; grid-row: 2; }
+}
+@media (min-width: 641px) {
+  .record .topbar { min-height: 56px; }
+  .record-main .grid-body { grid-auto-rows: minmax(46px, 60px); min-height: min(calc(var(--rows, 1) * 46px + (var(--rows, 1) - 1) * 4px), 62vh); }
+  .record-main .panel { padding: 8px 12px 8px; gap: 8px; }
+  .record-main .panel .param { padding: 6px 10px 8px; gap: 4px; }
+  .panel-do > .btn { min-height: 56px; }
+  .vitals { padding-block: 4px; }
+}
+@media (min-width: 641px) {
+  /* The list takes what the panel leaves, but never less than a row per exercise. */
+  .record-main .grid { flex: 1 1 0; min-height: auto; }
+}
+@media (min-width: 641px) {
+  .record-main .grid { min-height: min(calc(var(--rows, 1) * 46px + (var(--rows, 1) - 1) * 4px + 48px), 70vh); }
+  .record-main .grid-body { min-height: 0; }
+}
+@media (min-width: 641px) {
+  /* Blood pressure keys in two rows, so the class list above stays whole. */
+  .panel .keypad { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .panel .keypad .key { min-height: 52px; }
+}
+@media (min-width: 641px) {
+  .grid-name-text.is-long { font-size: 13px; line-height: 1.12; -webkit-line-clamp: 3; }
+}
