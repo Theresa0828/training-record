@@ -38,8 +38,10 @@
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+/* The page itself never moves: only #app scrolls inside it, so bars and the screen cannot slide away. */
 html, body, #app { height: 100%; }
-#app { overflow-x: clip; }
+html, body { overflow: hidden; overscroll-behavior: none; }
+#app { overflow-x: clip; overflow-y: auto; overscroll-behavior: none; -webkit-overflow-scrolling: touch; }
 html, body { margin: 0; touch-action: manipulation; }
 body {
   background: var(--bg); color: var(--fg); font: 400 16px/1.55 var(--font); font-synthesis: none;

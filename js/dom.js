@@ -82,6 +82,7 @@ function paint(motion) {
   // The new screen is live at once. The movement is only a hint of where it came from.
   if (motion) screen.classList.add(`enter-${motion}`);
   root.replaceChildren(screen);
+  root.scrollTop = 0;
   window.scrollTo(0, 0);
 }
 
@@ -260,7 +261,12 @@ export function installKeyboardLift() {
   const update = () => {
     const covered = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
     document.documentElement.style.setProperty('--keyboard', `${covered}px`);
+    // iPad leaves the whole page pushed up after the keyboard closes; put it back.
+    if (!covered && (window.scrollY || document.documentElement.scrollTop)) window.scrollTo(0, 0);
   };
+  document.addEventListener('focusout', () => setTimeout(() => {
+    if (!document.activeElement || document.activeElement === document.body) window.scrollTo(0, 0);
+  }, 100));
   viewport.addEventListener('resize', update);
   viewport.addEventListener('scroll', update);
 }
