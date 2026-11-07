@@ -17,6 +17,10 @@
   --alert: #420C14;
   --on-alert: #FCFBF6;
   --alert-soft: #F2E4DF;
+  --effort-low: #6C809A;
+  --effort-mid: #5E8B76;
+  --effort-high: #420C14;
+  --done-strong: #5E8B76;
   --on-alert-soft: #420C14;
   --hero: var(--surface);
   --on-hero: var(--fg);
@@ -33,6 +37,25 @@
   --primary: #420C14; --primary-text: #420C14; --on-primary: #FCFBF6; --next: #987D7C; --next-soft: #EFE3DB; --done: #D5D6AA;
   --line-strong: #987D7C;
 }
+/* 砂色＋森林綠 (2026-11-07): sand ground and outlined cards with a forest-green next step, mint for done,
+   and a soft terracotta for pain and hard effort so students never read the report as a warning. */
+[data-palette="mint"] {
+  --bg: #F1EEE3; --surface: #FCFBF6; --fg: #36311F; --muted: #59544B; --line: #E2DBBE; --soft: #ECE8D9;
+  --primary: #41775C; --primary-text: #41775C; --on-primary: #FCFBF6; --next: #41775C; --next-soft: #E4ECDD;
+  --done: #B4E5CC; --on-done: #020300; --done-strong: #41775C;
+  --alert: #A85A45; --on-alert: #FCFBF6; --alert-soft: #F6E6DC; --on-alert-soft: #9A4E3A;
+  --effort-low: #6C809A; --effort-mid: #41775C; --effort-high: #A85A45;
+  --land: #DCE6D2;
+  --card-shadow: inset 0 0 0 1.5px #E2DBBE, 0 1px 2px rgba(54, 49, 31, .05), 0 8px 22px rgba(54, 49, 31, .07);
+}
+/* Its layout touches: a soft green land with a wavy edge behind the top of every screen, and pill-shaped chips and main buttons. */
+[data-palette="mint"] body::before {
+  content: ""; position: fixed; left: 0; right: 0; top: 0; height: 150px; z-index: 0; pointer-events: none; background: var(--land);
+  -webkit-mask: linear-gradient(#000, #000) top / 100% 110px no-repeat, radial-gradient(62px 40px at 50% 0, #000 98%, transparent) 0 110px / 124px 40px repeat-x;
+  mask: linear-gradient(#000, #000) top / 100% 110px no-repeat, radial-gradient(62px 40px at 50% 0, #000 98%, transparent) 0 110px / 124px 40px repeat-x;
+}
+[data-palette="mint"] #app { position: relative; z-index: 1; }
+[data-palette="mint"] .btn.primary, [data-palette="mint"] .chip-btn { border-radius: 999px; }
 [data-palette="slate"] {
   --primary: #414535; --primary-text: #414535; --on-primary: #FCFBF6; --next: #6C809A; --next-soft: #E3E4DC; --done: #D5D6AA;
 }
@@ -862,20 +885,20 @@ button.stat-card:active { transform: scale(.985); }
 .rp-amount { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; }
 .rp-num { font-size: 28px; font-weight: 700; line-height: 1.1; }
 .rp-unit { font-size: 16px; color: var(--muted); }
-.rp-up { display: inline-block; padding: 0 7px; border-radius: 99px; background: var(--soft); color: var(--fg); box-shadow: inset 0 0 0 1.5px #5E8B76; font-size: 13px; font-weight: 700; line-height: 1.6; }
+.rp-up { display: inline-block; padding: 0 7px; border-radius: 99px; background: var(--soft); color: var(--fg); box-shadow: inset 0 0 0 1.5px var(--done-strong); font-size: 13px; font-weight: 700; line-height: 1.6; }
 .rp-dots { display: inline-flex; gap: 4px; }
 .rp-dots i { width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px rgba(0, 0, 0, .18); }
 .rp-reps { display: grid; gap: 4px; }
 .rp-reps b { font-size: 20px; font-weight: 700; line-height: 1.2; }
 .rp-sets { display: inline-flex; gap: 4px; flex-wrap: wrap; }
-.rp-sets i { width: 12px; height: 12px; border-radius: 50%; background: #5E8B76; }
+.rp-sets i { width: 12px; height: 12px; border-radius: 50%; background: var(--done-strong); }
 .rp-effort { display: flex; align-items: center; gap: 8px; }
 .rp-bar { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; flex: 1; max-width: 110px; }
 .rp-bar i { height: 12px; border-radius: 3px; background: var(--soft); }
 .rp-effort b { font-size: 20px; font-weight: 700; min-width: 1.2em; }
-.rp-bar.is-low i.on, .rp-key .is-low { background: #6C809A; }
-.rp-bar.is-mid i.on, .rp-key .is-mid { background: #5E8B76; }
-.rp-bar.is-high i.on, .rp-key .is-high { background: #420C14; }
+.rp-bar.is-low i.on, .rp-key .is-low { background: var(--effort-low); }
+.rp-bar.is-mid i.on, .rp-key .is-mid { background: var(--effort-mid); }
+.rp-bar.is-high i.on, .rp-key .is-high { background: var(--effort-high); }
 .rp-legend { margin-top: 4px; font-size: 13px; color: var(--muted); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 .rp-legend > span { display: inline-flex; align-items: center; gap: 4px; }
 .rp-none { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 500; }
@@ -885,6 +908,9 @@ button.stat-card:active { transform: scale(.985); }
 .rp-pain .body-caption { font-size: 13px; }
 .rp-pain-list { display: grid; gap: 6px; }
 .rp-alert { color: var(--alert); font-weight: 700; }
+.rp-score { color: var(--fg); font-weight: 700; }
+.rp-better { display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 13px; font-weight: 500; color: var(--done-strong); }
+.rp-better svg { width: 16px; height: 16px; }
 .rp-scale { font-size: 13px; color: var(--muted); }
 .rp-trend { width: 100%; height: auto; max-height: 120px; }
 .rp-axis { stroke: var(--line); stroke-width: 1; }
@@ -924,12 +950,12 @@ button.stat-card:active { transform: scale(.985); }
 .feel-rpe .chip-btn, .feel-even .chip-btn { padding-inline: 0; min-width: 0; }
 .feel-rpe .chip-btn { position: relative; overflow: hidden; }
 .feel-rpe .chip-btn::after { content: ""; position: absolute; left: 8px; right: 8px; bottom: 5px; height: 4px; border-radius: 2px; }
-.feel-rpe .rpe-low::after { background: #6C809A; }
-.feel-rpe .rpe-mid::after { background: #5E8B76; }
-.feel-rpe .rpe-high::after { background: #420C14; }
-.feel-rpe .rpe-low[aria-pressed="true"] { background: #6C809A; color: #FCFBF6; }
-.feel-rpe .rpe-mid[aria-pressed="true"] { background: #5E8B76; color: #FCFBF6; }
-.feel-rpe .rpe-high[aria-pressed="true"] { background: #420C14; color: #FCFBF6; }
+.feel-rpe .rpe-low::after { background: var(--effort-low); }
+.feel-rpe .rpe-mid::after { background: var(--effort-mid); }
+.feel-rpe .rpe-high::after { background: var(--effort-high); }
+.feel-rpe .rpe-low[aria-pressed="true"] { background: var(--effort-low); color: #FCFBF6; }
+.feel-rpe .rpe-mid[aria-pressed="true"] { background: var(--effort-mid); color: #FCFBF6; }
+.feel-rpe .rpe-high[aria-pressed="true"] { background: var(--effort-high); color: #FCFBF6; }
 .feel-rpe .chip-btn[aria-pressed="true"]::after { background: #FCFBF6; }
 .feel-pain { flex: 1; }
 .chip-btn.feel-pain.is-pain { background: var(--alert-soft); color: var(--on-alert-soft); box-shadow: inset 0 0 0 1.5px var(--alert); }

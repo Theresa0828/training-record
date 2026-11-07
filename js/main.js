@@ -22,6 +22,11 @@ async function boot() {
   installTapGuard();
   installKeyboardLift();
   await store.loadStore();
+  // 2026-11-07 the teacher chose 砂色＋森林綠: every device switches to it once; a later choice in 設定 is kept.
+  if (!store.getMeta('paletteMintOnce')) {
+    store.setMeta('palette', 'mint');
+    store.setMeta('paletteMintOnce', true);
+  }
   document.documentElement.dataset.palette = paletteId(store.getMeta('palette'));
   settleOldDrafts();
 

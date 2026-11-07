@@ -14,7 +14,8 @@ import { icon } from './icons.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const WEEK = '日一二三四五六';
-const EFFORT_WORDS = { low: '輕', mid: '中', high: '累' };
+// The student's words for effort: a high score means they worked hard, not that something is wrong (2026-11-07).
+const EFFORT_WORDS = { low: '輕鬆', mid: '剛好', high: '很努力' };
 
 function svg(tag, attrs = {}) {
   const el = document.createElementNS(NS, tag);
@@ -85,7 +86,7 @@ function amountCell(row) {
 function effortCell(rpe) {
   if (!rpe) return h('span', { class: 'rp-effort' }, h('span', { class: 'rp-unit' }, '—'));
   const level = effortLevel(rpe);
-  return h('span', { class: 'rp-effort', 'aria-label': `費力 ${rpe} 分，10 分最累` },
+  return h('span', { class: 'rp-effort', 'aria-label': `費力 ${rpe} 分，10 分是最努力` },
     h('span', { class: `rp-bar is-${level}`, 'aria-hidden': 'true' }, Array.from({ length: 10 }, (_, i) => h('i', { class: i < rpe ? 'on' : '' }))),
     h('b', {}, rpe));
 }
@@ -96,11 +97,11 @@ function exercisesCard(rows) {
   return card(rows.length > 5 ? 'span-6 rp-ex is-dense' : 'span-6 rp-ex', null,
     h('div', { class: 'rp-ex-top' },
       h('h3', {}, '今天做的動作'),
-      h('p', { class: 'rp-sum' }, h('b', {}, `${rows.length} 個動作`), regions.length ? '，練到' : '',
+      h('p', { class: 'rp-sum' }, '今天完成 ', h('b', {}, `${rows.length} 個動作`), regions.length ? '，練到' : '',
         regions.map((r) => h('span', { class: 'rp-tag' }, `${r.region} ${r.count}`)))),
     h('div', { class: 'rp-head', 'aria-hidden': 'true' },
       h('span', {}, '動作'), h('span', {}, '重量／彈簧'), h('span', {}, '次數・組數'),
-      h('span', {}, '費力', ['low', 'mid', 'high'].map((level) => h('span', { class: 'rp-key' }, h('i', { class: `is-${level}` }), EFFORT_WORDS[level])))),
+      h('span', {}, '費力')),
     h('ol', { class: 'rp-list' }, rows.map((row) => h('li', { class: 'rp-row' },
       h('span', { class: 'rp-what' },
         h('span', { class: 'rp-eq' }, row.equipment ? equipmentIcon(row.equipment) : icon('dumbbell')),
@@ -111,19 +112,27 @@ function exercisesCard(rows) {
       effortCell(row.rpe)))),
     h('p', { class: 'rp-legend' },
       anyUp && h('span', {}, h('span', { class: 'rp-up' }, '↑2'), ' 比上次重 2 公斤'),
-      h('span', {}, h('span', { class: 'rp-sets' }, h('i')), ' 一個圓點是一組')));
+      h('span', {}, h('span', { class: 'rp-sets' }, h('i')), ' 一個圓點是一組'),
+      h('span', {}, '費力', ['low', 'mid', 'high'].map((level) => h('span', { class: 'rp-key' }, h('i', { class: `is-${level}` }), EFFORT_WORDS[level])))));
 }
 
 function painCard(session, history) {
   const items = reportPain(session, history);
-  if (!items.length) return card('span-2', '疼痛', h('p', { class: 'rp-none' }, icon('check'), '今天沒有記到疼痛'));
+  // Told calmly: the score in plain ink, and a drop since last time said as progress (2026-11-07).
+  if (!items.length) return card('span-2', '身體的感覺', h('p', { class: 'rp-none' }, icon('check'), '今天身體沒有不舒服'));
   const map = bodyMap(() => {}, { readOnly: true });
   map.update(Object.fromEntries(items.filter((i) => i.score > 0).map((i) => [i.part, i.score])), null);
-  return card('span-2 rp-pain-card', '疼痛', h('div', { class: 'rp-pain' }, map.el,
+  const change = (item) => {
+    if (item.before === null) return null;
+    if (item.before > item.score) return h('p', { class: 'rp-better' }, icon('check'), `比上次少 ${item.before - item.score} 分`);
+    if (item.before === item.score) return h('p', { class: 'rp-note' }, '和上次一樣');
+    return h('p', { class: 'rp-note' }, `上次 ${item.before} 分`);
+  };
+  return card('span-2 rp-pain-card', '身體的感覺', h('div', { class: 'rp-pain' }, map.el,
     h('div', { class: 'rp-pain-list' }, items.slice(0, 2).map((item) => h('div', {},
-      h('p', { class: 'rp-say' }, `${item.part} `, h('b', { class: 'rp-alert' }, `${item.score} 分`)),
-      item.before !== null && h('p', { class: 'rp-note' }, `上次 ${item.before} 分`))),
-      h('p', { class: 'rp-scale' }, '0 不痛・10 最痛'))));
+      h('p', { class: 'rp-say' }, `${item.part} `, h('b', { class: 'rp-score' }, `${item.score} 分`)),
+      change(item))),
+      h('p', { class: 'rp-scale' }, '0 分是完全不痛'))));
 }
 
 /** One exercise's weight over the last classes: the one done most often that has a line to draw. */

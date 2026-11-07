@@ -5,8 +5,9 @@ import { call, currentStatus, isConnected, parsePairingCode, syncNow } from './s
 import { signaturePad } from './record.js';
 import { loadDemo, clearDemo } from './demo.js';
 
-export const DEFAULT_PALETTE = 'slate';
+export const DEFAULT_PALETTE = 'mint';
 export const PALETTES = [
+  ['mint', '砂色＋森林綠', ['#F1EEE3', '#B4E5CC', '#41775C', '#A85A45']],
   ['bordeaux', '砂色＋酒紅', ['#E2DBBE', '#D5D6AA', '#987D7C', '#420C14']],
   ['slate', '砂色＋灰藍', ['#E2DBBE', '#D5D6AA', '#9D858D', '#6C809A']],
 ];
