@@ -1,3 +1,4 @@
+import { APP_VERSION } from './core.js';
 import { h, button, tabBar, confirmSheet, openSheet, refreshView, toast } from './dom.js';
 import * as store from './store.js';
 import { call, currentStatus, isConnected, parsePairingCode, syncNow } from './sync.js';
@@ -116,6 +117,7 @@ function dataSection() {
   const demo = store.getMeta('demoLoaded');
   return h('section', { class: 'stack settings-card' },
     h('h2', {}, '資料'),
+    h('p', { class: 'muted' }, `目前版本 ${APP_VERSION}`),
     h('div', { class: 'row-wrap' },
       demo
         ? button('清除示範資料', () => { clearDemo(); refreshView(); toast('示範資料已清除'); }, '')

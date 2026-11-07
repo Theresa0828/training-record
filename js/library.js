@@ -286,7 +286,8 @@ function editSheet(exercise) {
           const next = { ...exercise, name: name.value.trim(), group: group.value.trim() };
           if (tags) {
             const value = tags.value();
-            if (JSON.stringify(value) !== JSON.stringify(exercise.tags || null)) Object.assign(next, { tags: value, tagsEdited: true });
+            // Compare cleaned tags, so tags saved before a new field existed do not count as a hand edit.
+            if (JSON.stringify(value) !== JSON.stringify(cleanPilatesTags(exercise.tags))) Object.assign(next, { tags: value, tagsEdited: true });
           }
           store.save('exercises', next);
           close();

@@ -1,6 +1,6 @@
 // Serves the app from the device so it opens instantly and works offline.
 // Bump VERSION on every release so devices fetch the new files.
-const VERSION = 'v14';
+const VERSION = 'v15';
 const CACHE = `training-record-${VERSION}`;
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png',
@@ -12,7 +12,11 @@ const FILES = [
 const FONTS = ["fonts/gsr-400-a-0.woff2","fonts/gsr-400-a-1.woff2","fonts/gsr-400-a-10.woff2","fonts/gsr-400-a-2.woff2","fonts/gsr-400-a-3.woff2","fonts/gsr-400-a-4.woff2","fonts/gsr-400-a-5.woff2","fonts/gsr-400-a-6.woff2","fonts/gsr-400-a-7.woff2","fonts/gsr-400-a-8.woff2","fonts/gsr-400-a-9.woff2","fonts/gsr-400-b-0.woff2","fonts/gsr-400-b-1.woff2","fonts/gsr-400-b-2.woff2","fonts/gsr-400-b-3.woff2","fonts/gsr-400-b-4.woff2","fonts/gsr-400-b-5.woff2","fonts/gsr-400-b-6.woff2","fonts/gsr-400-core.woff2","fonts/gsr-500-a-0.woff2","fonts/gsr-500-a-1.woff2","fonts/gsr-500-a-10.woff2","fonts/gsr-500-a-2.woff2","fonts/gsr-500-a-3.woff2","fonts/gsr-500-a-4.woff2","fonts/gsr-500-a-5.woff2","fonts/gsr-500-a-6.woff2","fonts/gsr-500-a-7.woff2","fonts/gsr-500-a-8.woff2","fonts/gsr-500-a-9.woff2","fonts/gsr-500-b-0.woff2","fonts/gsr-500-b-1.woff2","fonts/gsr-500-b-2.woff2","fonts/gsr-500-b-3.woff2","fonts/gsr-500-b-4.woff2","fonts/gsr-500-b-5.woff2","fonts/gsr-500-b-6.woff2","fonts/gsr-500-core.woff2","fonts/gsr-700-a-0.woff2","fonts/gsr-700-a-1.woff2","fonts/gsr-700-a-10.woff2","fonts/gsr-700-a-2.woff2","fonts/gsr-700-a-3.woff2","fonts/gsr-700-a-4.woff2","fonts/gsr-700-a-5.woff2","fonts/gsr-700-a-6.woff2","fonts/gsr-700-a-7.woff2","fonts/gsr-700-a-8.woff2","fonts/gsr-700-a-9.woff2","fonts/gsr-700-b-0.woff2","fonts/gsr-700-b-1.woff2","fonts/gsr-700-b-2.woff2","fonts/gsr-700-b-3.woff2","fonts/gsr-700-b-4.woff2","fonts/gsr-700-b-5.woff2","fonts/gsr-700-b-6.woff2","fonts/gsr-700-core.woff2"];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll([...FILES, ...FONTS])).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the browser's own short-term cache (GitHub Pages allows 10 minutes),
+  // so a new release never stores the previous release's files.
+  event.waitUntil(caches.open(CACHE)
+    .then((cache) => cache.addAll([...FILES, ...FONTS].map((file) => new Request(file, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {

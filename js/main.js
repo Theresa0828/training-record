@@ -60,6 +60,20 @@ async function boot() {
   startAutoSync();
 
   if ('serviceWorker' in navigator && window.isSecureContext) {
+    // A new release downloads in the background, but this page keeps running the old code until it reloads.
+    // Old code would quietly drop newer data (such as new classification fields on a handout import),
+    // so reload as soon as the new release takes over, except during a class.
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      if (currentView()?.name === 'record') {
+        toast('新版本已下載，下課後關掉分頁再開一次就會更新');
+        return;
+      }
+      reloading = true;
+      location.reload();
+    });
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 }

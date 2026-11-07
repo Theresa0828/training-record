@@ -348,6 +348,9 @@ export function planHandoutImport(file, active, getById) {
   return { add, link, update };
 }
 
+/** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
+export const APP_VERSION = 'v15';
+
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
 export const PILATES_POSTURES = ['仰躺', '俯趴', '側躺', '坐姿', '跪姿', '四足', '平板', '站姿', '弓箭步'];
