@@ -314,7 +314,11 @@ export function isHandoutFile(data) {
  * even if renamed or removed; one the teacher already added by the same name gains the handout.
  */
 export function planHandoutImport(file, active, getById) {
-  const byName = new Map(active.filter((e) => e.kind === 'pilates').map((e) => [e.name, e]));
+  // Different apparatus share names (Beats on Reformer and on Chair), so a name only counts as the
+  // same exercise on the same apparatus, or when the teacher's own one has no apparatus set.
+  const pilates = active.filter((e) => e.kind === 'pilates');
+  const byName = new Map(pilates.map((e) => [`${e.group}|${e.name}`, e]));
+  const loose = new Map(pilates.filter((e) => !e.handoutId && !APPARATUS.includes(e.group)).map((e) => [e.name, e]));
   const byHandout = new Map(active.filter((e) => e.handoutId).map((e) => [e.handoutId, e]));
   const add = [];
   const link = [];
@@ -330,14 +334,16 @@ export function planHandoutImport(file, active, getById) {
       if (tags && !existing.tagsEdited && differs(existing.tags, tags)) update.push({ ...existing, tags });
       continue;
     }
-    const same = byName.get(item.name);
+    const same = byName.get(`${item.group}|${item.name}`) || loose.get(item.name);
     if (same) {
       if (!same.handoutId) link.push(withTags({ ...same, handoutId: item.id, order: item.order }, tags));
+      byName.set(`${item.group}|${item.name}`, { ...same, handoutId: item.id });
+      loose.delete(item.name);
       continue;
     }
     const exercise = withTags({ id, name: item.name, group: item.group, kind: 'pilates', handoutId: item.id, order: item.order }, tags);
     add.push(exercise);
-    byName.set(item.name, exercise);
+    byName.set(`${item.group}|${item.name}`, exercise);
   }
   return { add, link, update };
 }
@@ -345,7 +351,12 @@ export function planHandoutImport(file, active, getById) {
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
 export const PILATES_POSTURES = ['仰躺', '俯趴', '側躺', '坐姿', '跪姿', '四足', '平板', '站姿', '弓箭步'];
-export const PILATES_FOCUS = ['穩定', '活動度', '協調', '平衡', '肌力'];
+// 2026-11-07: 穩定 and 活動度 are the body areas the handout names; 重點 keeps only 協調 and 平衡 (docs/皮拉提斯動作分類.md).
+export const PILATES_FOCUS = ['協調', '平衡'];
+export const PILATES_STABILITY = ['軀幹中立', '軀幹屈曲', '軀幹伸展', '軀幹旋轉', '軀幹側彎', '脊椎', '骨盆', '肩胛', '手臂', '下肢'];
+export const PILATES_MOBILITY = ['髖', '膝', '踝', '脊椎屈曲', '脊椎伸展', '脊椎旋轉', '脊椎側彎', '脊椎', '骨盆', '肩胛', '肩', '肘'];
+/** Classification fields that hold several values each. */
+export const PILATES_LIST_KEYS = ['stability', 'mobility', 'focus'];
 export const PILATES_LEVELS = ['入門', '中階', '進階'];
 
 /** Keeps only known values, so an edited or damaged file can never show odd labels. */
@@ -358,12 +369,14 @@ export function cleanPilatesTags(tags) {
   const clean = {
     region: one(tags.region, PILATES_REGIONS),
     posture: one(tags.posture, PILATES_POSTURES),
-    focus: words(tags.focus, PILATES_FOCUS.length).filter((f) => PILATES_FOCUS.includes(f)),
+    stability: words((tags.stability || []).filter?.((f) => PILATES_STABILITY.includes(f)), PILATES_STABILITY.length),
+    mobility: words((tags.mobility || []).filter?.((f) => PILATES_MOBILITY.includes(f)), PILATES_MOBILITY.length),
+    focus: words((tags.focus || []).filter?.((f) => PILATES_FOCUS.includes(f)), PILATES_FOCUS.length),
     level: [1, 2, 3].includes(tags.level) ? tags.level : 0,
     muscles: words(tags.muscles, 6),
     family: typeof tags.family === 'string' ? tags.family.trim().slice(0, 20) : '',
   };
-  return clean.region || clean.posture || clean.focus.length || clean.level || clean.muscles.length ? clean : null;
+  return clean.region || clean.posture || clean.stability.length || clean.mobility.length || clean.focus.length || clean.level || clean.muscles.length ? clean : null;
 }
 
 /** One short line under a Pilates exercise name, such as 下肢・仰躺・入門. */
@@ -372,18 +385,18 @@ export function pilatesTagText(tags) {
   return [tags.region, tags.posture, PILATES_LEVELS[tags.level - 1]].filter(Boolean).join('・');
 }
 
-/** Filters the library by any mix of 部位, 姿勢, 重點, 程度 and 器材. Empty filters let everything through. */
+/** Filters the library by any mix of 部位, 姿勢, 穩定, 活動度, 重點, 程度 and 器材. Empty filters let everything through. */
 export function filterPilates(list, filters = {}) {
   return list.filter((e) => (!filters.region || e.tags?.region === filters.region)
     && (!filters.posture || e.tags?.posture === filters.posture)
-    && (!filters.focus || (e.tags?.focus || []).includes(filters.focus))
+    && PILATES_LIST_KEYS.every((key) => !filters[key] || (e.tags?.[key] || []).includes(filters[key]))
     && (!filters.level || e.tags?.level === filters.level)
     && (!filters.apparatus || e.group === filters.apparatus));
 }
 
 /**
  * Easier, same-level and harder exercises for a Pilates exercise. The same series comes first,
- * then the same body region in the same position, then a shared focus.
+ * then the same body region in the same position or with something in common to stabilise, move or focus on.
  */
 export function pilatesSteps(current, library, limit = 3) {
   const empty = { easier: [], same: [], harder: [] };
@@ -398,8 +411,9 @@ export function pilatesSteps(current, library, limit = 3) {
     const region = t.region === mine.region;
     const posture = t.posture === mine.posture;
     const focus = shared(t.focus, mine.focus);
-    if (!family && !(region && (posture || focus))) continue;
-    scored.push({ e, score: (family ? 100 : 0) + (region ? 20 : 0) + (posture ? 10 : 0) + focus * 3 + shared(t.muscles, mine.muscles) * 2 - Math.abs(t.level - mine.level) });
+    const areas = shared(t.stability, mine.stability) + shared(t.mobility, mine.mobility);
+    if (!family && !(region && (posture || focus || areas))) continue;
+    scored.push({ e, score: (family ? 100 : 0) + (region ? 20 : 0) + (posture ? 10 : 0) + focus * 3 + areas * 2 + shared(t.muscles, mine.muscles) * 2 - Math.abs(t.level - mine.level) });
   }
   scored.sort((a, b) => b.score - a.score || (a.e.order ?? 0) - (b.e.order ?? 0));
   const pick = (test) => scored.filter(({ e }) => test(e.tags.level)).slice(0, limit).map(({ e }) => e);

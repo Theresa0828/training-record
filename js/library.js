@@ -2,7 +2,7 @@ import { h, button, holdButton, tabBar, openSheet, toast, refreshView } from './
 import * as store from './store.js';
 import {
   newId, APPARATUS, usageCounts, searchExercises, commonExercises, swapOptions, learnAlternative,
-  PILATES_REGIONS, PILATES_POSTURES, PILATES_FOCUS, PILATES_LEVELS, cleanPilatesTags, pilatesTagText, filterPilates, pilatesSteps,
+  PILATES_REGIONS, PILATES_POSTURES, PILATES_FOCUS, PILATES_STABILITY, PILATES_MOBILITY, PILATES_LIST_KEYS, PILATES_LEVELS, cleanPilatesTags, pilatesTagText, filterPilates, pilatesSteps,
 } from './core.js';
 import { handoutSheet, importHandoutSheet } from './handout.js';
 
@@ -23,22 +23,23 @@ function groupsOf(items, kind) {
 
 /** A name with its classification underneath, so similar Pilates names can be told apart. */
 function exerciseLabel(exercise, prefix = '') {
-  const tags = exercise.kind === 'pilates' ? pilatesTagText(exercise.tags) : '';
+  // The apparatus comes first, because the same name exists on several (Beats on Reformer and on Chair).
+  const tags = exercise.kind === 'pilates' ? [exercise.group, pilatesTagText(exercise.tags)].filter(Boolean).join('・') : '';
   return [h('span', { class: 'pick-name' }, `${prefix}${exercise.name}`), tags && h('small', { class: 'pick-tags' }, tags)];
 }
 
-const FILTER_ROWS = [['region', '部位', PILATES_REGIONS], ['posture', '姿勢', PILATES_POSTURES], ['focus', '重點', PILATES_FOCUS], ['level', '程度', PILATES_LEVELS]];
+const FILTER_ROWS = [['region', '部位', PILATES_REGIONS], ['posture', '姿勢', PILATES_POSTURES], ['stability', '穩定', PILATES_STABILITY], ['mobility', '活動度', PILATES_MOBILITY], ['focus', '重點', PILATES_FOCUS], ['level', '程度', PILATES_LEVELS]];
 
 function emptyFilters() {
-  return { region: '', posture: '', focus: '', level: '', apparatus: '' };
+  return { region: '', posture: '', stability: '', mobility: '', focus: '', level: '', apparatus: '' };
 }
 
 /**
- * Rows of filters for Pilates: 部位, 姿勢, 重點, 程度 and, once there is more than one, 器材.
+ * Rows of filters for Pilates: 部位, 姿勢, 穩定, 活動度, 重點, 程度 and, once there is more than one, 器材.
  * One tap per row narrows the list, so a suitable exercise is a few taps away. Only values in use are offered.
  */
 function pilatesFinder(items, filters, onChange, renderList) {
-  const has = (key, value) => items.some((e) => (key === 'focus' ? (e.tags?.focus || []).includes(value) : e.tags?.[key] === value));
+  const has = (key, value) => items.some((e) => (PILATES_LIST_KEYS.includes(key) ? (e.tags?.[key] || []).includes(value) : e.tags?.[key] === value));
   const valueOf = (key, label) => (key === 'level' ? PILATES_LEVELS.indexOf(label) + 1 : label);
   const rows = FILTER_ROWS
     .map(([key, label, values]) => [key, label, values.filter((value) => has(key, valueOf(key, value)))])
@@ -217,7 +218,8 @@ export function exercisePicker(defaultKind, onPick, { current = null } = {}) {
 
 /** Chips for the Pilates classification. The teacher's changes are kept even when the handout is imported again. */
 function tagEditor(exercise) {
-  const tags = { region: '', posture: '', focus: [], level: 0, muscles: [], family: '', ...(exercise.tags || {}) };
+  const tags = { region: '', posture: '', stability: [], mobility: [], focus: [], level: 0, muscles: [], family: '', ...(exercise.tags || {}) };
+  for (const key of PILATES_LIST_KEYS) if (!Array.isArray(tags[key])) tags[key] = [];
   const area = h('div', { class: 'stack-sm' });
   const muscles = h('input', { class: 'input', value: tags.muscles.join('、'), maxlength: 60, placeholder: '例如：臀肌、腹肌', 'aria-label': '主要肌群' });
   const single = (key, label, values, toValue = (v) => v) => h('div', { class: 'finder-row', role: 'group', 'aria-label': label },
@@ -226,16 +228,20 @@ function tagEditor(exercise) {
       tags[key] = tags[key] === toValue(value) ? (key === 'level' ? 0 : '') : toValue(value);
       draw();
     }, 'chip-btn', { 'aria-pressed': tags[key] === toValue(value) ? 'true' : 'false' }))));
+  // Several values each: tap to add, tap again to take away.
+  const many = (key, label, values) => h('div', { class: 'finder-row', role: 'group', 'aria-label': label },
+    h('span', { class: 'finder-label' }, label),
+    h('div', { class: 'chips' }, values.map((value) => button(value, () => {
+      tags[key] = tags[key].includes(value) ? tags[key].filter((f) => f !== value) : [...tags[key], value];
+      draw();
+    }, 'chip-btn', { 'aria-pressed': tags[key].includes(value) ? 'true' : 'false' }))));
   function draw() {
     area.replaceChildren(
       single('region', '部位', PILATES_REGIONS),
       single('posture', '姿勢', PILATES_POSTURES),
-      h('div', { class: 'finder-row', role: 'group', 'aria-label': '重點' },
-        h('span', { class: 'finder-label' }, '重點'),
-        h('div', { class: 'chips' }, PILATES_FOCUS.map((value) => button(value, () => {
-          tags.focus = tags.focus.includes(value) ? tags.focus.filter((f) => f !== value) : [...tags.focus, value];
-          draw();
-        }, 'chip-btn', { 'aria-pressed': tags.focus.includes(value) ? 'true' : 'false' })))),
+      many('stability', '穩定', PILATES_STABILITY),
+      many('mobility', '活動度', PILATES_MOBILITY),
+      many('focus', '重點', PILATES_FOCUS),
       single('level', '程度', PILATES_LEVELS, (v) => PILATES_LEVELS.indexOf(v) + 1),
       h('label', { class: 'field' }, h('span', { class: 'stepper-label' }, '主要肌群（用、分開）'), muscles));
   }
