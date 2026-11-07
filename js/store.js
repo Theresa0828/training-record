@@ -62,9 +62,18 @@ export async function loadStore() {
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 }
 
+/**
+ * 2026-11-07: the Pilates library holds only the teacher's handouts. Claude's sample Pilates exercises
+ * (demo_ex_*) stay hidden unless a handout import linked one to a handout exercise of the same name.
+ */
+export function isSamplePilates(record) {
+  return record.kind === 'pilates' && String(record.id).startsWith('demo_ex_') && !record.handoutId;
+}
+
 export function all(collection) {
   // A removed starter exercise stays gone even if this device or Drive holds an older copy of it.
-  return [...memory[collection].values()].filter((r) => !r.deleted && !(collection === 'exercises' && REMOVED_IDS.has(r.id)));
+  return [...memory[collection].values()].filter((r) => !r.deleted
+    && !(collection === 'exercises' && (REMOVED_IDS.has(r.id) || isSamplePilates(r))));
 }
 
 export function get(collection, id) {

@@ -34,7 +34,12 @@ function session(id, studentId, date, kind, rows, extra = {}) {
 }
 
 export function loadDemo() {
-  for (const exercise of DEMO_PILATES) store.saveFromSync('exercises', { ...exercise, demo: true, updatedAt: 1 });
+  // Kept only so the sample class can show its exercise names; the library hides them (store.isSamplePilates).
+  // One already linked to a handout exercise is the teacher's now, so it is left alone.
+  for (const exercise of DEMO_PILATES) {
+    if (store.get('exercises', exercise.id)?.handoutId) continue;
+    store.saveFromSync('exercises', { ...exercise, demo: true, updatedAt: 1 });
+  }
 
   store.saveFromSync('students', {
     id: 'demo_s1', name: '示範學員 A', aliases: [], demo: true, updatedAt: 1,
@@ -101,7 +106,8 @@ export function loadDemo() {
 export function clearDemo() {
   for (const collection of ['students', 'exercises', 'sessions', 'plans', 'events']) {
     for (const record of store.all(collection)) {
-      if (record.demo) store.removeLocal(collection, record.id);
+      // A sample exercise linked to a handout is part of the handout library now: keep it.
+      if (record.demo && !(collection === 'exercises' && record.handoutId)) store.removeLocal(collection, record.id);
     }
   }
   store.setMeta('demoLoaded', false);

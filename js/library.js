@@ -28,7 +28,16 @@ function exerciseLabel(exercise, prefix = '') {
   return [h('span', { class: 'pick-name' }, `${prefix}${exercise.name}`), tags && h('small', { class: 'pick-tags' }, tags)];
 }
 
-const FILTER_ROWS = [['region', '部位', PILATES_REGIONS], ['posture', '姿勢', PILATES_POSTURES], ['stability', '穩定', PILATES_STABILITY], ['mobility', '活動度', PILATES_MOBILITY], ['focus', '重點', PILATES_FOCUS], ['level', '程度', PILATES_LEVELS]];
+// How the Pilates filters are laid out, so the right chip is found in a second (docs/設計規範.md B-15):
+// short fields share a row, chips sit in body order in small groups, and a repeated word such as
+// 軀幹 is written once in front of its choices. A value missing from this layout still shows, at the end.
+const FILTER_LAYOUT = [
+  [{ key: 'apparatus', label: '器材' }, { key: 'level', label: '程度', groups: [PILATES_LEVELS] }],
+  [{ key: 'region', label: '部位', groups: [['肩臂', '脊椎', '核心', '下肢', '全身']] }, { key: 'focus', label: '重點', groups: [PILATES_FOCUS] }],
+  [{ key: 'posture', label: '姿勢', groups: [['仰躺', '俯趴', '側躺'], ['坐姿', '跪姿', '四足'], ['平板', '站姿', '弓箭步']] }],
+  [{ key: 'stability', label: '穩定', all: PILATES_STABILITY, groups: [{ prefix: '軀幹', values: ['軀幹中立', '軀幹屈曲', '軀幹伸展', '軀幹旋轉', '軀幹側彎'] }, ['脊椎'], ['肩胛', '手臂'], ['骨盆', '下肢']] }],
+  [{ key: 'mobility', label: '活動度', all: PILATES_MOBILITY, groups: [{ prefix: '脊椎', values: ['脊椎屈曲', '脊椎伸展', '脊椎旋轉', '脊椎側彎'] }, ['脊椎'], ['肩胛', '肩', '肘'], ['骨盆', '髖', '膝', '踝']] }],
+];
 
 function emptyFilters() {
   return { region: '', posture: '', stability: '', mobility: '', focus: '', level: '', apparatus: '' };
@@ -41,20 +50,34 @@ function emptyFilters() {
 function pilatesFinder(items, filters, onChange, renderList) {
   const has = (key, value) => items.some((e) => (PILATES_LIST_KEYS.includes(key) ? (e.tags?.[key] || []).includes(value) : e.tags?.[key] === value));
   const valueOf = (key, label) => (key === 'level' ? PILATES_LEVELS.indexOf(label) + 1 : label);
-  const rows = FILTER_ROWS
-    .map(([key, label, values]) => [key, label, values.filter((value) => has(key, valueOf(key, value)))])
-    .filter(([, , values]) => values.length);
-  const apparatus = [...new Set(items.map((e) => e.group).filter(Boolean))];
-  if (apparatus.length > 1) rows.push(['apparatus', '器材', apparatus]);
+  const apparatus = [...new Set(items.map((e) => e.group).filter(Boolean))].sort();
+  const chip = (key, value, text = value, cls = 'chip-btn') => {
+    const wanted = valueOf(key, value);
+    return button(text, () => { filters[key] = filters[key] === wanted ? '' : wanted; onChange(); }, cls,
+      { 'aria-pressed': filters[key] === wanted ? 'true' : 'false', 'aria-label': value });
+  };
+  // Each field: its groups with only the values some exercise has; empty groups and fields drop out.
+  const field = ({ key, label, groups, all }) => {
+    if (key === 'apparatus') groups = apparatus.length > 1 ? [apparatus] : [];
+    const placed = new Set(groups.flatMap((g) => (Array.isArray(g) ? g : g.values)));
+    const extra = (all || []).filter((value) => !placed.has(value));
+    const kept = [...groups, ...(extra.length ? [extra] : [])]
+      .map((g) => (Array.isArray(g) ? { values: g } : g))
+      .map((g) => ({ ...g, values: g.values.filter((value) => key === 'apparatus' || has(key, valueOf(key, value))) }))
+      .filter((g) => g.values.length);
+    if (!kept.length) return null;
+    return h('div', { class: 'finder-field', role: 'group', 'aria-label': label },
+      h('span', { class: 'finder-label' }, label),
+      h('div', { class: 'finder-chips' }, kept.map((g) => (g.prefix
+        ? h('span', { class: 'chip-seg' }, h('span', { class: 'chip-seg-name', 'aria-hidden': 'true' }, g.prefix),
+          g.values.map((value) => chip(key, value, value.slice(g.prefix.length), 'chip-btn seg-btn')))
+        : h('span', { class: 'chip-group' }, g.values.map((value) => chip(key, value)))))));
+  };
+  const rows = FILTER_LAYOUT.map((fields) => fields.map(field).filter(Boolean)).filter((fields) => fields.length);
   const active = Object.values(filters).some(Boolean);
   const matches = filterPilates(items, filters);
   return h('section', { class: 'finder' },
-    rows.map(([key, label, values]) => h('div', { class: 'finder-row', role: 'group', 'aria-label': label },
-      h('span', { class: 'finder-label' }, label),
-      h('div', { class: 'chips' }, values.map((value) => {
-        const wanted = valueOf(key, value);
-        return button(value, () => { filters[key] = filters[key] === wanted ? '' : wanted; onChange(); }, 'chip-btn', { 'aria-pressed': filters[key] === wanted ? 'true' : 'false' });
-      })))),
+    rows.map((fields) => h('div', { class: 'finder-row' }, fields)),
     active && h('div', { class: 'row-between finder-count' },
       h('strong', {}, `符合 ${matches.length} 個`),
       button('清除條件', () => { Object.assign(filters, emptyFilters()); onChange(); }, 'ghost')),
