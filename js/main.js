@@ -1,6 +1,6 @@
 import { go, registerView, installTapGuard, installKeyboardLift, refreshView, currentView, toast } from './dom.js';
 import * as store from './store.js';
-import { startAutoSync, onStatus } from './sync.js';
+import { startAutoSync, onStatus, onCalendarChange } from './sync.js';
 import { dateKey } from './core.js';
 import { todayView } from './today.js';
 import { recordView, settleOldDrafts } from './record.js';
@@ -61,6 +61,12 @@ async function boot() {
     }
     // New bookings may have arrived. Never redraw under an open class record.
     if (finished && currentView()?.name === 'today') refreshView();
+  });
+  // A booking moved in the calendar redraws the screens that show it, but never a class record or an open sheet.
+  onCalendarChange(() => {
+    if (!['today', 'overview', 'report'].includes(currentView()?.name)) return;
+    if (document.querySelector('#sheet-root .sheet-overlay')) return;
+    refreshView();
   });
   startAutoSync();
 

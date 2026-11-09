@@ -8,6 +8,15 @@ let running = false;
 let again = false;
 let timer = null;
 const REQUEST_TIMEOUT_MS = 60000;
+// While the app stays open, the calendar is read again this often, so a booking moved elsewhere shows up by itself.
+const CALENDAR_REFRESH_MS = 5 * 60 * 1000;
+const calendarListeners = new Set();
+let calendarSignature = null;
+
+/** Called after a calendar read that changed a booking. */
+export function onCalendarChange(listener) {
+  calendarListeners.add(listener);
+}
 
 export function currentStatus() {
   return status;
@@ -106,6 +115,9 @@ async function syncCalendar() {
   const today = dateKey();
   const { teacher } = connection();
   const { events } = await call('events', { calendarId, from: today });
+  const signature = JSON.stringify(events.map((e) => [e.id, e.date, e.time, e.title]));
+  const changed = calendarSignature !== null && signature !== calendarSignature;
+  calendarSignature = signature;
   store.replaceEvents(events.map((event) => {
     const parsed = parseBookingTitle(event.title, teacher);
     return {
@@ -118,6 +130,7 @@ async function syncCalendar() {
       title: parsed ? '' : event.title,
     };
   }));
+  if (changed) for (const listener of calendarListeners) listener();
 }
 
 /** Runs one round. Calls made during a round queue exactly one more. */
@@ -162,5 +175,8 @@ export function startAutoSync() {
     else store.flush();
   });
   window.addEventListener('pagehide', () => store.flush());
+  setInterval(() => {
+    if (document.visibilityState === 'visible') syncNow();
+  }, CALENDAR_REFRESH_MS);
   syncNow();
 }

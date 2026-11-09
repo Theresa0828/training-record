@@ -53,7 +53,10 @@ export function classNumberSheet(studentId, session, onDone) {
   });
 }
 
-/** The choices for the next class date. Each tap saves at once; the calendar is only read, never changed. */
+/**
+ * The next class date. The company calendar wins: with a booking there, it is shown and the way to change it is
+ * the calendar. Without one, the teacher picks a date here; each tap saves at once. The calendar is never changed.
+ */
 export function nextDateControl(studentId, onChange) {
   const wrap = h('div', { class: 'stack-sm next-date' });
 
@@ -70,11 +73,17 @@ export function nextDateControl(studentId, onChange) {
     const events = store.all('events');
     const info = nextClassInfo(student, events, today);
     const booking = nextBooking(student, events, today);
+    if (booking) {
+      wrap.replaceChildren(
+        h('p', { class: 'next-date-state is-confirmed' }, `日曆：${dateWithWeek(booking.date)}${booking.time ? ` ${booking.time}` : ''}`),
+        h('p', { class: 'muted' }, '以公司日曆為準。要改時間，請在公司日曆修改，這裡會自動跟著更新。'));
+      return;
+    }
     const nextWeek = addDays(today, 7);
     const isPicked = (date) => info.confirmed && info.date === date;
     const choice = (label, date, time) => button(label, () => save(isPicked(date) ? '' : date, time), 'chip-btn', { 'aria-pressed': isPicked(date) ? 'true' : 'false' });
     const custom = h('input', { class: 'input', type: 'date', min: addDays(today, 1), 'aria-label': '選其他日期' });
-    custom.value = info.confirmed && info.date !== booking?.date && info.date !== nextWeek ? info.date : '';
+    custom.value = info.confirmed && info.date !== nextWeek ? info.date : '';
     custom.addEventListener('change', () => {
       if (!custom.value) return;
       if (custom.value <= today) { toast('下次上課要選今天之後的日期'); custom.value = ''; return; }
@@ -82,11 +91,9 @@ export function nextDateControl(studentId, onChange) {
     });
     wrap.replaceChildren(...[
       h('p', { class: info.confirmed ? 'next-date-state is-confirmed' : 'next-date-state' },
-        info.confirmed ? `已確認：${dateWithWeek(info.date)}${info.time ? ` ${info.time}` : ''}` : '還沒確認，點一個日期'),
-      info.conflict && h('p', { class: 'warn-text' }, `日曆上的下一堂是 ${dateWithWeek(booking.date)} ${booking.time}，和你確認的日期不同。`),
-      h('div', { class: 'chips' },
-        booking && choice(`日曆 ${dateWithWeek(booking.date)} ${booking.time}`, booking.date, booking.time),
-        booking?.date !== nextWeek && choice(`下週同一天 ${dateWithWeek(nextWeek)}`, nextWeek, '')),
+        info.confirmed ? `已確認：${dateWithWeek(info.date)}${info.time ? ` ${info.time}` : ''}` : '日曆上還沒有預約，點一個日期'),
+      info.confirmed && h('p', { class: 'muted' }, '日曆上還沒有預約。在日曆約好後，會改用日曆的日期和時間。'),
+      h('div', { class: 'chips' }, choice(`下週同一天 ${dateWithWeek(nextWeek)}`, nextWeek, '')),
       h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '其他日期'), custom),
     ].filter(Boolean));
   }

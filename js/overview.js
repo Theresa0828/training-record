@@ -169,15 +169,16 @@ function termCard(studentId, todaySession, count) {
 
 function nextCard(student) {
   const info = nextClassInfo(student, store.all('events'), dateKey());
-  const state = !info.date ? '點一下設定' : info.confirmed ? '已確認' : '待確認';
+  // The calendar is the booking; a date picked only in the app still needs booking in the calendar.
+  const state = !info.date ? '點一下設定' : info.source === 'calendar' ? '日曆' : '日曆還沒約';
   return h('button', {
     type: 'button',
     class: 'stat-card rise span-2',
-    'aria-label': info.date ? `下次上課 ${info.date} ${state}，點一下確認` : '下次上課還沒確定，點一下設定',
+    'aria-label': info.date ? `下次上課 ${info.date} ${info.time}，${state}` : '下次上課還沒確定，點一下設定',
     onclick: () => nextDateSheet(student.id, refreshView),
   },
   h('span', { class: 'card-title' }, h('span', {}, '下次上課')),
-  h('span', { class: 'term-body' }, calendarPage(info.date), h('span', { class: 'term-side' }, info.time && h('span', { class: 'next-time' }, info.time), h('span', { class: info.confirmed ? 'muted small' : 'card-note' }, state))));
+  h('span', { class: 'term-body' }, calendarPage(info.date), h('span', { class: 'term-side' }, info.time && h('span', { class: 'next-time' }, info.time), h('span', { class: info.source === 'calendar' ? 'muted small' : 'card-note' }, state))));
 }
 
 function statusCard(history, span) {

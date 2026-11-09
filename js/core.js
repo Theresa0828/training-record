@@ -222,18 +222,19 @@ export function nextBooking(student, events, today) {
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0] || null;
 }
 
-/** A date the teacher confirmed counts until it passes; a calendar booking alone is only a suggestion. */
+/**
+ * The next class. The company calendar wins (2026-11-09): when it holds this student's next booking, that date
+ * and time show everywhere, so a booking moved in the calendar never leaves an old time in the app.
+ * A date picked in the app only counts while the calendar has no booking for the student yet.
+ * source: 'calendar' | 'teacher' | '' (nothing known).
+ */
 export function nextClassInfo(student, events, today) {
   const booking = nextBooking(student, events, today);
+  if (booking) return { date: booking.date, time: booking.time || '', confirmed: true, source: 'calendar' };
   if (student.nextClassDate > today) {
-    return {
-      date: student.nextClassDate,
-      time: student.nextClassTime || (booking?.date === student.nextClassDate ? booking.time : ''),
-      confirmed: true,
-      conflict: !!booking && booking.date !== student.nextClassDate,
-    };
+    return { date: student.nextClassDate, time: student.nextClassTime || '', confirmed: true, source: 'teacher' };
   }
-  return { date: booking?.date || '', time: booking?.time || '', confirmed: false, conflict: false };
+  return { date: '', time: '', confirmed: false, source: '' };
 }
 
 /** Moves one exercise and returns where the given row ended up, so the selection stays on it. */
@@ -349,7 +350,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v17';
+export const APP_VERSION = 'v18';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
