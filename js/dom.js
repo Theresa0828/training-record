@@ -254,19 +254,59 @@ export function installTapGuard() {
   document.addEventListener('gesturestart', (e) => e.preventDefault());
 }
 
-/** Lifts sheets above the on-screen keyboard, which iOS does not account for. */
+/**
+ * Keeps whatever is being typed above the on-screen keyboard, which iOS does not account for.
+ * Sheets shrink to the part of the screen the keyboard leaves free, the page gets room to scroll,
+ * and the focused field is scrolled into that free part.
+ */
+const TYPED = 'input:not([type="file"]):not([type="date"]):not([type="checkbox"]):not([type="radio"]), textarea, [contenteditable="true"]';
+
+function scrollParent(el) {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight) return node;
+  }
+  return document.getElementById('app');
+}
+
+export function revealField(el, viewport = window.visualViewport) {
+  if (!el?.matches?.(TYPED)) return;
+  const box = scrollParent(el);
+  if (!box) return;
+  const freeTop = Math.max(box.getBoundingClientRect().top, viewport ? viewport.offsetTop : 0) + 12;
+  const freeBottom = Math.min(box.getBoundingClientRect().bottom, viewport ? viewport.offsetTop + viewport.height : window.innerHeight) - 12;
+  const rect = el.getBoundingClientRect();
+  // A tall note box only needs its top lines showing; the caret is near the top while writing.
+  const bottom = Math.min(rect.bottom, rect.top + 120);
+  if (bottom > freeBottom) box.scrollTop += bottom - freeBottom;
+  else if (rect.top < freeTop) box.scrollTop -= freeTop - rect.top;
+}
+
 export function installKeyboardLift() {
   const viewport = window.visualViewport;
   if (!viewport) return;
+  const root = document.documentElement.style;
+  let lastCovered = 0;
   const update = () => {
-    const covered = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
-    document.documentElement.style.setProperty('--keyboard', `${covered}px`);
+    const covered = Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop));
+    root.setProperty('--keyboard', `${covered}px`);
+    root.setProperty('--vv-top', `${Math.max(0, Math.round(viewport.offsetTop))}px`);
+    root.setProperty('--vv-height', `${Math.round(viewport.height)}px`);
     // iPad leaves the whole page pushed up after the keyboard closes; put it back.
     if (!covered && (window.scrollY || document.documentElement.scrollTop)) window.scrollTo(0, 0);
+    if (covered && covered !== lastCovered) requestAnimationFrame(() => revealField(document.activeElement, viewport));
+    lastCovered = covered;
   };
+  document.addEventListener('focusin', (e) => {
+    if (!e.target?.matches?.(TYPED)) return;
+    // The keyboard takes a moment to slide up, and Chrome on iPad does not always report it at once.
+    for (const wait of [60, 350, 700]) setTimeout(() => { update(); revealField(document.activeElement, viewport); }, wait);
+  });
   document.addEventListener('focusout', () => setTimeout(() => {
     if (!document.activeElement || document.activeElement === document.body) window.scrollTo(0, 0);
+    update();
   }, 100));
   viewport.addEventListener('resize', update);
   viewport.addEventListener('scroll', update);
+  update();
 }

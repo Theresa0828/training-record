@@ -12,6 +12,23 @@ export const BAND = '彈力帶';
 export const BAND_COLORS = ['黃', '紅', '綠', '藍', '黑'];
 export const BODY_GROUPS = ['下肢', '胸', '背', '肩', '手臂', '核心'];
 
+/**
+ * Every body part a strength exercise belongs to; the first is its main one (2026-11-09).
+ * Finding uses all of them, counting uses only the main one so nothing is counted twice.
+ */
+export function exerciseGroups(exercise) {
+  const list = (exercise?.groups || []).filter(Boolean);
+  if (list.length) return list;
+  return [exercise?.group || '其他'];
+}
+
+/** Stores the chosen parts: `groups` holds all of them, `group` the main one, which older code reads. */
+export function withGroups(exercise, groups) {
+  const list = [...new Set(groups.filter(Boolean))];
+  const clean = list.length ? list : ['其他'];
+  return { ...exercise, group: clean[0], groups: clean };
+}
+
 export function newId(prefix = 'x') {
   const random = Math.random().toString(36).slice(2, 10);
   return `${prefix}_${Date.now().toString(36)}${random}`;
@@ -350,18 +367,31 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v18';
+export const APP_VERSION = 'v19';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
 export const PILATES_POSTURES = ['仰躺', '俯趴', '側躺', '坐姿', '跪姿', '四足', '平板', '站姿', '弓箭步'];
 // 2026-11-07: 穩定 and 活動度 are the body areas the handout names; 重點 keeps only 協調 and 平衡 (docs/皮拉提斯動作分類.md).
 export const PILATES_FOCUS = ['協調', '平衡'];
-export const PILATES_STABILITY = ['軀幹中立', '軀幹屈曲', '軀幹伸展', '軀幹旋轉', '軀幹側彎', '脊椎', '骨盆', '肩胛', '手臂', '下肢'];
+export const PILATES_STABILITY = ['軀幹中立', '軀幹屈曲', '軀幹伸展', '軀幹旋轉', '軀幹側彎', '骨盆', '肩胛', '手臂', '下肢'];
 export const PILATES_MOBILITY = ['髖', '膝', '踝', '脊椎屈曲', '脊椎伸展', '脊椎旋轉', '脊椎側彎', '脊椎', '骨盆', '肩胛', '肩', '肘'];
 /** Classification fields that hold several values each. */
 export const PILATES_LIST_KEYS = ['stability', 'mobility', 'focus'];
 export const PILATES_LEVELS = ['入門', '中階', '進階'];
+
+/**
+ * 2026-11-09 穩定's 脊椎 joined 軀幹. Exercises classified before then (or edited by hand) still say 脊椎:
+ * it becomes 軀幹 held the ways the spine moves in 活動度, else 軀幹屈曲, as the handout import now does
+ * for "spine during articulation". Re-importing the handout gives the exact words-based result.
+ */
+export function legacySpine(tags) {
+  const list = Array.isArray(tags.stability) ? tags.stability : [];
+  if (!list.includes('脊椎')) return list;
+  const moves = (Array.isArray(tags.mobility) ? tags.mobility : []).filter((m) => typeof m === 'string' && m.startsWith('脊椎') && m !== '脊椎');
+  const holds = moves.length ? moves.map((m) => '軀幹' + m.slice(2)) : ['軀幹屈曲'];
+  return [...new Set(list.flatMap((area) => (area === '脊椎' ? holds : [area])))];
+}
 
 /** Keeps only known values, so an edited or damaged file can never show odd labels. */
 export function cleanPilatesTags(tags) {
@@ -373,7 +403,7 @@ export function cleanPilatesTags(tags) {
   const clean = {
     region: one(tags.region, PILATES_REGIONS),
     posture: one(tags.posture, PILATES_POSTURES),
-    stability: words((tags.stability || []).filter?.((f) => PILATES_STABILITY.includes(f)), PILATES_STABILITY.length),
+    stability: words(legacySpine(tags).filter((f) => PILATES_STABILITY.includes(f)), PILATES_STABILITY.length),
     mobility: words((tags.mobility || []).filter?.((f) => PILATES_MOBILITY.includes(f)), PILATES_MOBILITY.length),
     focus: words((tags.focus || []).filter?.((f) => PILATES_FOCUS.includes(f)), PILATES_FOCUS.length),
     level: [1, 2, 3].includes(tags.level) ? tags.level : 0,
@@ -569,7 +599,7 @@ const squeeze = (text) => String(text || '').toLowerCase().replace(/\s+/g, '');
 export function searchExercises(items, query) {
   const wanted = squeeze(query);
   if (!wanted) return items;
-  return items.filter((item) => [item.name, item.group, ...(item.aliases || [])].some((text) => squeeze(text).includes(wanted)));
+  return items.filter((item) => [item.name, ...exerciseGroups(item), ...(item.aliases || [])].some((text) => squeeze(text).includes(wanted)));
 }
 
 /** The quick list: the ones the teacher pinned, then the most used. */
@@ -586,7 +616,7 @@ export function swapOptions(current, items, usage, limit = 8) {
   const own = (current?.alternatives || []).map((id) => byId.get(id)).filter((item) => item && item.id !== current.id);
   if (own.length) return { sameGroup: false, list: own.slice(0, limit) };
   const list = items
-    .filter((item) => item.id !== current?.id && current?.group && item.group === current.group)
+    .filter((item) => item.id !== current?.id && current?.group && exerciseGroups(item).some((g) => exerciseGroups(current).includes(g)))
     .sort((a, b) => (usage.get(b.id) || 0) - (usage.get(a.id) || 0))
     .slice(0, limit);
   return { sameGroup: true, list };

@@ -1,7 +1,7 @@
 // Today's class for the student to read on the teacher's iPad. Plain words and pictures, one screen.
 // Internal notes, quality scores, help, tags, blood pressure and contraindications are never shown.
 // Going back to the records needs a one-second hold, so the student never wanders into another student's file.
-import { h, holdButton, back } from './dom.js';
+import { h, holdButton, back, openSheet } from './dom.js';
 import * as store from './store.js';
 import {
   dateKey, doneSessions, nextClassInfo, learnedSummary, exerciseTrend, layRegion,
@@ -165,16 +165,25 @@ function trendCard(session, history) {
 
 function learnedCard(session, history, span) {
   const summary = learnedSummary([session, ...history], store.all('exercises'), (id) => store.get('exercises', id));
-  const counts = new Map();
+  // Grouped by the student's words for each body part; a tap lists the exercises themselves (2026-11-09).
+  const byRegion = new Map();
   for (const group of [...summary.strength.groups, ...summary.pilates.groups]) {
-    if (!group.learned || group.group === '未分類' || group.group === '其他') continue;
-    const name = layRegion(group.group);
-    counts.set(name, (counts.get(name) || 0) + group.learned);
+    if (!group.learned) continue;
+    const name = group.group === '未分類' || group.group === '其他' ? '其他' : layRegion(group.group);
+    byRegion.set(name, [...(byRegion.get(name) || []), ...group.names]);
   }
   const total = summary.strength.count + summary.pilates.count;
-  const tiles = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, span === 'span-2' ? 4 : 6);
-  return card(span, '已經學會的動作', h('p', { class: 'rp-big' }, `${total} 個`),
-    tiles.length > 0 && h('div', { class: 'rp-tiles' }, tiles.map(([name, n]) => h('div', { class: 'rp-tile' }, h('b', {}, `${n} 個`), h('span', {}, name)))));
+  const tiles = [...byRegion.entries()].filter(([name]) => name !== '其他')
+    .sort((a, b) => b[1].length - a[1].length).slice(0, span === 'span-2' ? 4 : 6);
+  const open = () => openSheet('已經學會的動作', () => h('div', { class: 'stack rp-learned' },
+    [...byRegion.entries()].sort((a, b) => (a[0] === '其他') - (b[0] === '其他') || b[1].length - a[1].length).map(([name, names]) => h('section', { class: 'field' },
+      h('h3', { class: 'rp-learned-head' }, name, h('span', {}, `${names.length} 個`)),
+      h('ul', { class: 'rp-learned-list' }, names.map((n) => h('li', {}, n))))),
+    total === 0 && h('p', { class: 'rp-note' }, '做完第一個動作就會出現在這裡。')));
+  return h('button', { type: 'button', class: `card rp-card rp-learn ${span}`, onclick: open, 'aria-label': `已經學會 ${total} 個動作，點一下看是哪些` },
+    h('h3', {}, '已經學會的動作', h('span', { class: 'rp-more', 'aria-hidden': 'true' }, icon('next'))),
+    h('p', { class: 'rp-big' }, `${total} 個`),
+    tiles.length > 0 && h('div', { class: 'rp-tiles' }, tiles.map(([name, names]) => h('div', { class: 'rp-tile' }, h('b', {}, `${names.length} 個`), h('span', {}, name)))));
 }
 
 export function reportView({ studentId, sessionId }) {

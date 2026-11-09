@@ -1,7 +1,7 @@
 import { go, registerView, installTapGuard, installKeyboardLift, refreshView, currentView, toast } from './dom.js';
 import * as store from './store.js';
 import { startAutoSync, onStatus, onCalendarChange } from './sync.js';
-import { dateKey } from './core.js';
+import { dateKey, legacySpine } from './core.js';
 import { todayView } from './today.js';
 import { recordView, settleOldDrafts } from './record.js';
 import { overviewView } from './overview.js';
@@ -28,6 +28,11 @@ async function boot() {
     store.setMeta('paletteMintOnce', true);
   }
   document.documentElement.dataset.palette = paletteId(store.getMeta('palette'));
+  // 2026-11-09 穩定's 脊椎 joined 軀幹: exercises saved before then are rewritten once, hand edits included.
+  for (const exercise of store.all('exercises')) {
+    if (exercise.kind !== 'pilates' || !exercise.tags?.stability?.includes?.('脊椎')) continue;
+    store.save('exercises', { ...exercise, tags: { ...exercise.tags, stability: legacySpine(exercise.tags) } });
+  }
   settleOldDrafts();
 
   registerView('today', todayView);

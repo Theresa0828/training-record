@@ -6,7 +6,7 @@ const DEMO_PILATES = [
   { id: 'demo_ex_1', name: 'Footwork', group: 'Reformer', kind: 'pilates', tags: { region: '下肢', posture: '仰躺', stability: ['軀幹中立', '下肢'], mobility: ['髖', '膝'], focus: [], level: 1, muscles: ['股四頭肌', '臀肌'], family: '腳踩踏' } },
   { id: 'demo_ex_2', name: 'Hundred', group: 'Reformer', kind: 'pilates', tags: { region: '核心', posture: '仰躺', stability: ['軀幹屈曲', '肩胛'], mobility: ['髖'], focus: ['協調'], level: 2, muscles: ['腹肌'], family: '捲腹' } },
   { id: 'demo_ex_3', name: 'Elephant', group: 'Reformer', kind: 'pilates', tags: { region: '全身', posture: '站姿', stability: ['軀幹中立', '肩胛'], mobility: ['骨盆'], focus: [], level: 1, muscles: ['腹肌', '腿後肌'], family: '推拉車台' } },
-  { id: 'demo_ex_4', name: 'Swan', group: 'Arc Barrel', kind: 'pilates', tags: { region: '脊椎', posture: '俯趴', stability: ['脊椎', '肩胛'], mobility: ['脊椎伸展', '肩'], focus: [], level: 2, muscles: ['背伸肌'], family: '伸展脊椎' } },
+  { id: 'demo_ex_4', name: 'Swan', group: 'Arc Barrel', kind: 'pilates', tags: { region: '脊椎', posture: '俯趴', stability: ['軀幹伸展', '肩胛'], mobility: ['脊椎伸展', '肩'], focus: [], level: 2, muscles: ['背伸肌'], family: '伸展脊椎' } },
 ];
 
 function strength(name) {

@@ -1,7 +1,7 @@
 import { h, button, holdButton, tabBar, openSheet, toast, refreshView } from './dom.js';
 import * as store from './store.js';
 import {
-  newId, APPARATUS, usageCounts, searchExercises, commonExercises, swapOptions, learnAlternative,
+  newId, APPARATUS, BODY_GROUPS, exerciseGroups, withGroups, usageCounts, searchExercises, commonExercises, swapOptions, learnAlternative,
   PILATES_REGIONS, PILATES_POSTURES, PILATES_FOCUS, PILATES_STABILITY, PILATES_MOBILITY, PILATES_LIST_KEYS, PILATES_LEVELS, cleanPilatesTags, pilatesTagText, filterPilates, pilatesSteps,
 } from './core.js';
 import { handoutSheet, importHandoutSheet } from './handout.js';
@@ -16,7 +16,8 @@ function byKind(kind) {
 }
 
 function groupsOf(items, kind) {
-  const seen = new Set(items.map((item) => item.group || '其他'));
+  const seen = new Set(kind === 'strength' ? BODY_GROUPS : []);
+  for (const item of items) for (const group of kind === 'strength' ? exerciseGroups(item) : [item.group || '其他']) seen.add(group);
   if (kind === 'pilates') for (const apparatus of APPARATUS) seen.add(apparatus);
   return [...seen];
 }
@@ -35,7 +36,7 @@ const FILTER_LAYOUT = [
   [{ key: 'apparatus', label: '器材' }, { key: 'level', label: '程度', groups: [PILATES_LEVELS] }],
   [{ key: 'region', label: '部位', groups: [['肩臂', '脊椎', '核心', '下肢', '全身']] }, { key: 'focus', label: '重點', groups: [PILATES_FOCUS] }],
   [{ key: 'posture', label: '姿勢', groups: [['仰躺', '俯趴', '側躺'], ['坐姿', '跪姿', '四足'], ['平板', '站姿', '弓箭步']] }],
-  [{ key: 'stability', label: '穩定', all: PILATES_STABILITY, groups: [{ prefix: '軀幹', values: ['軀幹中立', '軀幹屈曲', '軀幹伸展', '軀幹旋轉', '軀幹側彎'] }, ['脊椎'], ['肩胛', '手臂'], ['骨盆', '下肢']] }],
+  [{ key: 'stability', label: '穩定', all: PILATES_STABILITY, groups: [{ prefix: '軀幹', values: ['軀幹中立', '軀幹屈曲', '軀幹伸展', '軀幹旋轉', '軀幹側彎'] }, ['肩胛', '手臂'], ['骨盆', '下肢']] }],
   [{ key: 'mobility', label: '活動度', all: PILATES_MOBILITY, groups: [{ prefix: '脊椎', values: ['脊椎屈曲', '脊椎伸展', '脊椎旋轉', '脊椎側彎'] }, ['脊椎'], ['肩胛', '肩', '肘'], ['骨盆', '髖', '膝', '踝']] }],
 ];
 
@@ -87,23 +88,48 @@ function pilatesFinder(items, filters, onChange, renderList) {
 /** Adds one exercise without leaving the class or the plan. */
 function addExerciseSheet(kind, name, group, onAdded) {
   openSheet('新增動作', (close) => {
-    let chosen = group || '其他';
     const input = h('input', { class: 'input', value: name || '', maxlength: 40, placeholder: '動作名稱', 'aria-label': '動作名稱' });
+    const choice = kind === 'strength' ? groupPicker(group && group !== '其他' ? [group] : []) : null;
+    let chosen = group || '其他';
     const groups = h('div', { class: 'chips' });
     const drawGroups = () => groups.replaceChildren(...[...new Set([...groupsOf(byKind(kind), kind), '其他'])].map((option) => button(option, () => { chosen = option; drawGroups(); }, 'chip-btn', { 'aria-pressed': option === chosen ? 'true' : 'false' })));
-    drawGroups();
+    if (!choice) drawGroups();
     return h('div', { class: 'stack' }, input,
-      h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, kind === 'pilates' ? '器材' : '部位'), groups),
+      choice ? choice.el : h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '器材'), groups),
       button('加入', () => {
         const clean = input.value.trim();
         if (!clean) { toast('名稱不可空白'); return; }
         const same = byKind(kind).find((item) => item.name === clean);
-        const exercise = same || { id: newId('ex'), name: clean, kind, group: chosen };
+        const fresh = { id: newId('ex'), name: clean, kind, group: chosen };
+        const exercise = same || (choice ? withGroups(fresh, choice.value()) : fresh);
         if (!same) store.save('exercises', exercise);
         close();
         onAdded(exercise);
       }, 'big primary'));
   });
+}
+
+/**
+ * Body parts for a strength exercise, several allowed (2026-11-09). The first one tapped is the main one,
+ * used when counting what a student has learned; it is marked 主要 so the teacher can see which it is.
+ */
+function groupPicker(initial) {
+  const chosen = [...initial];
+  const chips = h('div', { class: 'chips' });
+  const draw = () => chips.replaceChildren(...[...BODY_GROUPS, '其他'].map((option) => {
+    const at = chosen.indexOf(option);
+    return button([option, at === 0 && chosen.length > 1 ? h('small', { class: 'chip-main' }, '主要') : null], () => {
+      if (at >= 0) chosen.splice(at, 1);
+      else if (option === '其他') chosen.splice(0, chosen.length, '其他');
+      else { const other = chosen.indexOf('其他'); if (other >= 0) chosen.splice(other, 1); chosen.push(option); }
+      draw();
+    }, 'chip-btn', { 'aria-pressed': at >= 0 ? 'true' : 'false', 'aria-label': at === 0 && chosen.length > 1 ? `${option}，主要部位` : option });
+  }));
+  draw();
+  return {
+    el: h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '部位（可以複選，第一個點的是主要部位）'), chips),
+    value: () => chosen,
+  };
 }
 
 /** Chooses which exercises to offer in place of this one. */
@@ -222,7 +248,7 @@ export function exercisePicker(defaultKind, onPick, { current = null } = {}) {
           h('h3', {}, kind === 'pilates' ? '依器材找' : '依部位找'),
           h('div', { class: 'chips' }, groups.map((option) => button(option, () => { group = group === option ? null : option; draw(); }, 'chip-btn', { 'aria-pressed': group === option ? 'true' : 'false' })))));
         if (group) {
-          const inGroup = items.filter((item) => (item.group || '其他') === group);
+          const inGroup = items.filter((item) => (kind === 'strength' ? exerciseGroups(item) : [item.group || '其他']).includes(group));
           parts.push(inGroup.length ? h('div', { class: 'pick-grid' }, inGroup.map(pick)) : h('p', { class: 'muted' }, `${group} 還沒有動作。`));
         }
         parts.push(button('＋ 新增動作', add, 'add-row'));
@@ -278,11 +304,13 @@ function tagEditor(exercise) {
 function editSheet(exercise) {
   openSheet('編輯動作', (close) => {
     const name = h('input', { class: 'input', value: exercise.name, 'aria-label': '動作名稱' });
-    const group = h('input', { class: 'input', value: exercise.group || '', 'aria-label': '分類或器材' });
+    const strength = exercise.kind !== 'pilates';
+    const parts = strength ? groupPicker(exerciseGroups(exercise).filter((g) => g !== '其他')) : null;
+    const group = strength ? null : h('input', { class: 'input', value: exercise.group || '', 'aria-label': '器材' });
     const tags = exercise.kind === 'pilates' ? tagEditor(exercise) : null;
     return h('div', { class: 'stack' },
       h('div', { class: 'stepper-label' }, '動作名稱'), name,
-      h('div', { class: 'stepper-label' }, exercise.kind === 'pilates' ? '器材' : '分類'), group,
+      parts ? parts.el : [h('div', { class: 'stepper-label' }, '器材'), group],
       tags && h('div', { class: 'stepper-label' }, '分類（找動作和建議退階、進階用）'),
       tags?.el,
       button(exercise.pinned ? '★ 已設為常用，點一下取消' : '☆ 設為常用', () => {
@@ -306,7 +334,8 @@ function editSheet(exercise) {
         }, 'ghost'),
         button('儲存', () => {
           if (!name.value.trim()) { toast('名稱不可空白'); return; }
-          const next = { ...exercise, name: name.value.trim(), group: group.value.trim() };
+          const named = { ...exercise, name: name.value.trim() };
+          const next = parts ? withGroups(named, parts.value()) : { ...named, group: group.value.trim() };
           if (tags) {
             const value = tags.value();
             // Compare cleaned tags, so tags saved before a new field existed do not count as a hand edit.
@@ -387,10 +416,12 @@ export function libraryView() {
   const section = (kind, title) => {
     const items = byKind(kind);
     const groups = new Map();
+    // A strength exercise in several body parts shows under each of them.
     for (const item of items) {
-      const group = item.group || '其他';
-      if (!groups.has(group)) groups.set(group, []);
-      groups.get(group).push(item);
+      for (const group of kind === 'strength' ? exerciseGroups(item) : [item.group || '其他']) {
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group).push(item);
+      }
     }
     return h('section', { class: 'stack span-6' },
       h('h2', {}, `${title}（${items.length}）`),
