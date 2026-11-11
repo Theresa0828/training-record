@@ -1,6 +1,6 @@
 import { h, button, go, tab, tabBar, refreshView } from './dom.js';
 import * as store from './store.js';
-import { dateKey, findStudentByName, doneSessions, studentsNeedingPlan, newId, nextClassNumber, classLabel } from './core.js';
+import { dateKey, chosenCalendars, findStudentByName, doneSessions, studentsNeedingPlan, newId, nextClassNumber, classLabel } from './core.js';
 import { nextDateText } from './classinfo.js';
 import { currentStatus, isConnected, syncNow } from './sync.js';
 import { loadDemo } from './demo.js';
@@ -110,7 +110,7 @@ export function todayView() {
   const need = studentsNeedingPlan(upcoming.filter((e) => e.date > today), store.all('students'), store.all('plans'), today);
   const connected = isConnected();
   const demo = store.getMeta('demoLoaded');
-  const noCalendar = connected && !store.getMeta('calendarId');
+  const noCalendar = connected && !chosenCalendars(store.getMeta('calendarIds'), store.getMeta('calendarId')).length;
   const status = currentStatus();
 
   const items = readable.map((event) => describe(event, today));

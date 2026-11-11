@@ -1,6 +1,7 @@
-import { APP_VERSION } from './core.js';
+import { APP_VERSION, chosenCalendars } from './core.js';
 import { h, button, tabBar, confirmSheet, openSheet, refreshView, toast } from './dom.js';
 import * as store from './store.js';
+import { icon } from './icons.js';
 import { call, currentStatus, isConnected, parsePairingCode, syncNow } from './sync.js';
 import { signaturePad } from './record.js';
 import { loadDemo, clearDemo } from './demo.js';
@@ -28,21 +29,27 @@ function connectSection() {
     message.textContent = '讀取日曆中';
     try {
       const data = await call('calendars');
-      const selected = store.getMeta('calendarId');
-      message.textContent = '請選擇存放預約的公司日曆';
-      calendars.replaceChildren(...data.calendars.map((calendar) => button(calendar.name, () => {
-        store.setMeta('calendarId', calendar.id);
-        toast(`已選擇 ${calendar.name}`);
-        syncNow();
-        loadCalendars();
-      }, 'list-item', { 'aria-pressed': calendar.id === selected ? 'true' : 'false' })));
+      const selected = chosenCalendars(store.getMeta('calendarIds'), store.getMeta('calendarId'));
+      message.textContent = selected.length ? `已選 ${selected.length} 本日曆。皮拉提斯和重訓分開的話，兩本都點。` : '請點存放預約的公司日曆，可以選好幾本';
+      // Several calendars can be on at once; a tap turns one on or off (2026-11-11).
+      calendars.replaceChildren(...data.calendars.map((calendar) => {
+        const on = selected.includes(calendar.id);
+        return button([h('span', { class: `cal-check${on ? ' is-on' : ''}`, 'aria-hidden': 'true' }, on ? icon('check') : null), calendar.name], () => {
+          const next = on ? selected.filter((id) => id !== calendar.id) : [...selected, calendar.id];
+          store.setMeta('calendarIds', next);
+          store.setMeta('calendarId', next[0] || null);
+          toast(on ? `不再讀取 ${calendar.name}` : `已加入 ${calendar.name}`);
+          syncNow();
+          loadCalendars();
+        }, 'list-item cal-item', { 'aria-pressed': on ? 'true' : 'false' });
+      }));
     } catch (error) {
       message.textContent = `讀取失敗：${error.message}`;
     }
   }
 
   // Right after pairing the calendar is the only thing left to do, so offer it without another tap.
-  if (connected && !store.getMeta('calendarId')) loadCalendars();
+  if (connected && !chosenCalendars(store.getMeta('calendarIds'), store.getMeta('calendarId')).length) loadCalendars();
 
   return h('section', { class: 'stack settings-card' },
     h('h2', {}, 'Google 連線'),

@@ -1,6 +1,6 @@
 // Talks to the Apps Script on the teacher's Google account. Runs only in the background.
 import * as store from './store.js';
-import { mergeRecords, fileForRecord, collectionForFile, parseBookingTitle, isUnreadableBooking, dateKey } from './core.js';
+import { mergeRecords, fileForRecord, collectionForFile, parseBookingTitle, isUnreadableBooking, dateKey, chosenCalendars, mergeCalendarEvents } from './core.js';
 
 const statusListeners = new Set();
 let status = { state: 'idle', message: '' };
@@ -110,11 +110,13 @@ async function syncRecords() {
 }
 
 async function syncCalendar() {
-  const calendarId = store.getMeta('calendarId');
-  if (!calendarId) return;
+  const ids = chosenCalendars(store.getMeta('calendarIds'), store.getMeta('calendarId'));
+  if (!ids.length) return;
   const today = dateKey();
   const { teacher } = connection();
-  const { events } = await call('events', { calendarId, from: today });
+  // All or nothing: if one calendar cannot be read, the bookings already shown stay instead of half vanishing.
+  const lists = await Promise.all(ids.map((calendarId) => call('events', { calendarId, from: today }).then((data) => data.events)));
+  const events = mergeCalendarEvents(lists);
   const signature = JSON.stringify(events.map((e) => [e.id, e.date, e.time, e.title]));
   const changed = calendarSignature !== null && signature !== calendarSignature;
   calendarSignature = signature;

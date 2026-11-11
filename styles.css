@@ -998,3 +998,9 @@ button.stat-card:active { transform: scale(.985); }
 
 /* Strength body parts, several allowed: the main one carries a small tag. */
 .chip-main { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: var(--on-primary); color: var(--primary-text); font-size: 13px; font-weight: 500; }
+
+/* Calendar choice in 設定: several can be on, each with its own tick. */
+.btn.cal-item { display: flex; align-items: center; gap: 10px; }
+.cal-check { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; box-shadow: inset 0 0 0 2px var(--line-strong); font-weight: 700; }
+.cal-check.is-on { background: var(--primary); color: var(--on-primary); box-shadow: none; }
+.cal-check svg { width: 18px; height: 18px; }

@@ -13,6 +13,22 @@ export const BAND_COLORS = ['黃', '紅', '綠', '藍', '黑'];
 export const BODY_GROUPS = ['下肢', '胸', '背', '肩', '手臂', '核心'];
 
 /**
+ * The calendars to read bookings from. Several are allowed, because the company books Pilates and
+ * strength in separate calendars (2026-11-11). Older versions saved one id as calendarId.
+ */
+export function chosenCalendars(ids, oldId) {
+  const list = Array.isArray(ids) ? ids : oldId ? [oldId] : [];
+  return [...new Set(list.filter((id) => typeof id === 'string' && id))];
+}
+
+/** One list from every calendar: the same booking shared into two calendars counts once, in time order. */
+export function mergeCalendarEvents(lists) {
+  const byId = new Map();
+  for (const list of lists) for (const event of list || []) if (!byId.has(event.id)) byId.set(event.id, event);
+  return [...byId.values()].sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')) || a.id.localeCompare(b.id));
+}
+
+/**
  * Every body part a strength exercise belongs to; the first is its main one (2026-11-09).
  * Finding uses all of them, counting uses only the main one so nothing is counted twice.
  */
@@ -367,7 +383,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v19';
+export const APP_VERSION = 'v20';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
