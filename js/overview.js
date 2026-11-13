@@ -3,7 +3,7 @@ import { h, button, holdButton, backButton, go, back, home, openSheet, confirmSh
 import * as store from './store.js';
 import { classNumberSheet, nextDateSheet } from './classinfo.js';
 import {
-  dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, recentPain, learnedSummary, pilatesLevel,
+  dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, studentForEvent, cleanBirthday, recentPain, learnedSummary, pilatesLevel,
   weightTrends, painSeries, overallStatus, bodyCompSummary, painList, painText, setPainMap,
 } from './core.js';
 import { openPainSheet, painScores } from './painsheet.js';
@@ -22,6 +22,8 @@ function editProfileSheet(student) {
   openSheet('學生資料', (close) => {
     const name = h('input', { class: 'input', value: student.name, 'aria-label': '姓名' });
     const aliases = h('input', { class: 'input', value: (student.aliases || []).join('、'), 'aria-label': '日曆上的其他寫法' });
+    // Only needed when two students share a name: the calendar title then reads 王小明 0828 (2026-11-12).
+    const birthday = h('input', { class: 'input', value: student.birthday || '', inputmode: 'numeric', maxlength: 4, placeholder: '例：0828', 'aria-label': '生日，月日 4 碼' });
     const goal = h('textarea', { class: 'input', 'aria-label': '訓練目標' });
     goal.value = student.goal || '';
     const contra = h('textarea', { class: 'input', 'aria-label': '疼痛與禁忌' });
@@ -54,6 +56,7 @@ function editProfileSheet(student) {
     const hasRecords = store.all('sessions').some((s) => s.studentId === student.id);
     return h('div', { class: 'stack' },
       h('div', { class: 'stepper-label' }, '姓名'), name,
+      h('div', { class: 'stepper-label' }, '生日（月日 4 碼，同名同姓時才需要，和日曆上寫的一樣）'), birthday,
       h('div', { class: 'stepper-label' }, '日曆上的其他寫法（用、分開）'), aliases,
       h('div', { class: 'stepper-label' }, '訓練目標'), goal,
       h('div', { class: 'stepper-label' }, '疼痛與禁忌'), contra, painButton,
@@ -61,9 +64,12 @@ function editProfileSheet(student) {
       button('儲存', () => {
         const nextName = name.value.trim();
         if (!nextName) { toast('姓名不可空白'); return; }
+        const day = cleanBirthday(birthday.value);
+        if (birthday.value.trim() && !day) { toast('生日請寫月日 4 碼，例如 0828'); return; }
         store.save('students', {
           ...current(),
           name: nextName,
+          birthday: day,
           aliases: aliases.value.split(/[、,，]/).map((a) => a.trim()).filter(Boolean),
           goal: goal.value,
           contraindications: contra.value,
@@ -78,7 +84,7 @@ function editProfileSheet(student) {
         h('div', { class: 'stepper-label' }, '這其實是舊學生的另一個寫法？點選合併：'),
         others.map((other) => button(other.name, () => {
           const merged = findStudentByName(others, other.name);
-          store.save('students', { ...merged, aliases: [...new Set([...(merged.aliases || []), student.name])] });
+          store.save('students', { ...merged, birthday: merged.birthday || student.birthday || '', aliases: [...new Set([...(merged.aliases || []), student.name])] });
           store.save('students', { ...student, deleted: true });
           close();
           back();
@@ -168,7 +174,7 @@ function termCard(studentId, todaySession, count) {
 }
 
 function nextCard(student) {
-  const info = nextClassInfo(student, store.all('events'), dateKey());
+  const info = nextClassInfo(student, store.all('events'), dateKey(), store.all('students'));
   // The calendar is the booking; a date picked only in the app still needs booking in the calendar.
   const state = !info.date ? '點一下設定' : info.source === 'calendar' ? '日曆' : '日曆還沒約';
   return h('button', {
@@ -381,7 +387,7 @@ export function overviewView({ studentId }) {
   const hasPlan = plan && !plan.used && plan.rows?.length;
   const today = dateKey();
   const inClass = store.all('sessions').some((s) => s.studentId === studentId && s.date === today && s.status === 'draft');
-  const bookedToday = store.all('events').some((e) => e.date === today && e.student && findStudentByName([student], e.student));
+  const bookedToday = store.all('events').some((e) => e.date === today && studentForEvent(store.all('students'), e)?.id === student.id);
   const todaySession = store.all('sessions').find((s) => s.studentId === studentId && s.date === today && s.classNo);
   const count = todaySession ? { no: todaySession.classNo, size: todaySession.packageSize } : nextClassNumber(history.filter((s) => s.date !== today), student);
   // Whatever this student needs next is the one big button.
@@ -394,7 +400,7 @@ export function overviewView({ studentId }) {
   return h('div', { class: 'screen has-action overview' },
     h('header', { class: 'topbar' },
       backButton(),
-      h('h1', {}, student.name),
+      h('h1', {}, student.name, student.birthday ? h('small', { class: 'name-birthday' }, ` ${student.birthday}`) : null),
       h('div', { class: 'topbar-actions' },
         history.length > 0 && button(`紀錄 ${history.length}`, () => historySheet(history), 'ghost', { 'aria-label': `過去紀錄，共 ${history.length} 堂` }),
         history.length > 0 && button('PDF', () => pdfSheet(student, history), 'ghost', { 'aria-label': '匯出 PDF' }),

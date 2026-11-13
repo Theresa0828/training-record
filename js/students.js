@@ -10,7 +10,7 @@ function row(student) {
   const needsProfile = !student.contraindications && !student.goal;
   return h('button', { type: 'button', class: 'slot student-row', onclick: () => go('overview', { studentId: student.id }) },
     h('span', {},
-      h('span', { class: 'slot-name' }, student.name),
+      h('span', { class: 'slot-name' }, student.name, student.birthday ? h('small', { class: 'muted' }, ` ${student.birthday}`) : null),
       h('span', { class: 'slot-meta' }, last ? `上次 ${last.date.slice(5).replace('-', '/')}・${kindLabel(last.kind)}` : '還沒有紀錄')),
     needsProfile ? h('span', { class: 'chip chip-alert' }, '未建檔') : h('span', {}),
     icon('next', 'go'));

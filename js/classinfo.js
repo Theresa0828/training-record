@@ -71,8 +71,8 @@ export function nextDateControl(studentId, onChange) {
     const student = store.get('students', studentId);
     const today = dateKey();
     const events = store.all('events');
-    const info = nextClassInfo(student, events, today);
-    const booking = nextBooking(student, events, today);
+    const info = nextClassInfo(student, events, today, store.all('students'));
+    const booking = nextBooking(student, events, today, store.all('students'));
     if (booking) {
       wrap.replaceChildren(
         h('p', { class: 'next-date-state is-confirmed' }, `日曆：${dateWithWeek(booking.date)}${booking.time ? ` ${booking.time}` : ''}`),
@@ -110,7 +110,7 @@ export function nextDateSheet(studentId, onDone) {
 
 /** The short text for the next class, for a button or a list. */
 export function nextDateText(student) {
-  const info = nextClassInfo(student, store.all('events'), dateKey());
+  const info = nextClassInfo(student, store.all('events'), dateKey(), store.all('students'));
   if (info.confirmed) return `下次 ${dateWithWeek(info.date)}`;
   return info.date ? `下次 ${dateWithWeek(info.date)}？` : '下次未確認';
 }

@@ -1,4 +1,4 @@
-import { APP_VERSION, chosenCalendars } from './core.js';
+import { APP_VERSION, chosenCalendars, CALENDAR_KINDS, guessCalendarKind } from './core.js';
 import { h, button, tabBar, confirmSheet, openSheet, refreshView, toast } from './dom.js';
 import * as store from './store.js';
 import { icon } from './icons.js';
@@ -30,18 +30,33 @@ function connectSection() {
     try {
       const data = await call('calendars');
       const selected = chosenCalendars(store.getMeta('calendarIds'), store.getMeta('calendarId'));
-      message.textContent = selected.length ? `已選 ${selected.length} 本日曆。皮拉提斯和重訓分開的話，兩本都點。` : '請點存放預約的公司日曆，可以選好幾本';
-      // Several calendars can be on at once; a tap turns one on or off (2026-11-11).
+      message.textContent = selected.length ? `已選 ${selected.length} 本日曆。皮拉提斯和重訓分開的話，兩本都點。` : '請點存放預約的日曆，可以選好幾本';
+      // Several calendars can be on at once; a tap turns one on or off (2026-11-11). Each one that is on
+      // says what it holds: Pilates, strength, or the shared company calendar with the teacher's name in titles (2026-11-12).
+      const kinds = { ...(store.getMeta('calendarKinds', {}) || {}) };
       calendars.replaceChildren(...data.calendars.map((calendar) => {
         const on = selected.includes(calendar.id);
-        return button([h('span', { class: `cal-check${on ? ' is-on' : ''}`, 'aria-hidden': 'true' }, on ? icon('check') : null), calendar.name], () => {
+        const toggle = button([h('span', { class: `cal-check${on ? ' is-on' : ''}`, 'aria-hidden': 'true' }, on ? icon('check') : null), calendar.name], () => {
           const next = on ? selected.filter((id) => id !== calendar.id) : [...selected, calendar.id];
+          if (!on && !kinds[calendar.id]) store.setMeta('calendarKinds', { ...kinds, [calendar.id]: guessCalendarKind(calendar.name) });
           store.setMeta('calendarIds', next);
           store.setMeta('calendarId', next[0] || null);
           toast(on ? `不再讀取 ${calendar.name}` : `已加入 ${calendar.name}`);
           syncNow();
           loadCalendars();
         }, 'list-item cal-item', { 'aria-pressed': on ? 'true' : 'false' });
+        if (!on) return toggle;
+        const kind = kinds[calendar.id] || 'shared';
+        const choose = h('div', { class: 'cal-kind', role: 'group', 'aria-label': `${calendar.name}裡的課` },
+          h('span', { class: 'muted small' }, '這本是'),
+          h('span', { class: 'chip-seg' }, CALENDAR_KINDS.map(([value, label]) => button(label, () => {
+            store.setMeta('calendarKinds', { ...kinds, [calendar.id]: value });
+            toast(`${calendar.name}：${label}`);
+            syncNow();
+            loadCalendars();
+          }, 'chip-btn seg-btn', { 'aria-pressed': value === kind ? 'true' : 'false' }))));
+        return h('div', { class: 'cal-row' }, toggle, choose,
+          h('p', { class: 'muted small' }, kind === 'shared' ? '只讀標題開頭是你名字的課，課別看標題。' : `每一筆都是你的${kind === 'pilates' ? '皮拉提斯' : '重訓'}課，標題寫學生姓名就好，同名同姓再加生日（例：王小明 0828）。`));
       }));
     } catch (error) {
       message.textContent = `讀取失敗：${error.message}`;

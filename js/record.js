@@ -10,6 +10,7 @@ import { exercisePicker, rememberSwaps } from './library.js';
 import { handoutButton } from './handout.js';
 import { classNumberSheet, nextDateControl, nextDateSheet, nextDateText } from './classinfo.js';
 import { springEditor as springControls } from './spring.js';
+import { apparatusOf, apparatusSprings } from './plan.js';
 import { numberSheet } from './numpad.js';
 import { icon } from './icons.js';
 import { openPainSheet as openPainMap, painScores } from './painsheet.js';
@@ -432,7 +433,7 @@ export function recordView({ studentId, kind }) {
       for (let s = selected.set; s < MAX_SETS; s++) paintCell(selected.row, s);
       renderPanel();
     };
-    return springControls(set.spring || '', update, commonSprings(store.all('sessions'), 4));
+    return springControls(set.spring || '', update, apparatusSprings(row), apparatusOf(row));
   }
 
   function addedOptions(type) {

@@ -5,8 +5,24 @@ export const DEFAULT_TAGS = ['左肩痛', '腰代償', '脖子代償', '肩胛�
 export const DEFAULT_PROPS = ['滾筒', '彈力帶', '瑜珈球', 'Box'];
 export const APPARATUS = ['Reformer', 'Cadillac', 'Chair', 'Mat', 'Arc Barrel', 'Spine Corrector'];
 export const ASSIST_LEVELS = ['無', '少', '中', '多'];
-export const SPRING_COLORS = ['r', 'b', 'y', 'g'];
-export const SPRING_BARS = ['l', 'm', 'h'];
+// Each apparatus has its own springs (2026-11-13). Reformer: red, blue, yellow, green and a low/middle/high bar.
+// Chair: black and green, hung in the Top/High/Middle/Low hole, written in capitals (1k1g T). Cadillac: yellow, purple, short red, long red, blue.
+export const SPRING_SETS = {
+  reformer: { colors: ['r', 'b', 'y', 'g'], positions: ['l', 'm', 'h'] },
+  chair: { colors: ['k', 'g'], positions: ['T', 'H', 'M', 'L'] },
+  cadillac: { colors: ['y', 'p', 'rs', 'rl', 'b'], positions: [] },
+};
+const SPRING_ORDER = ['r', 'rs', 'rl', 'b', 'y', 'p', 'k', 'g'];
+export const SPRING_WORDS = { r: '紅', rs: '紅短', rl: '紅長', b: '藍', y: '黃', p: '紫', k: '黑', g: '綠' };
+
+/** Which spring set an exercise uses, from its apparatus. */
+export function springKind(apparatus) {
+  return apparatus === 'Chair' ? 'chair' : apparatus === 'Cadillac' ? 'cadillac' : 'reformer';
+}
+
+export function springSet(apparatus) {
+  return SPRING_SETS[springKind(apparatus)];
+}
 export const EQUIPMENT = ['啞鈴', '槓鈴', '壺鈴', '彈力帶', '六角槓', '藥球', '地雷管'];
 export const BAND = '彈力帶';
 export const BAND_COLORS = ['黃', '紅', '綠', '藍', '黑'];
@@ -74,6 +90,66 @@ export function parseBookingTitle(title, teacher) {
 export function isUnreadableBooking(title, teacher) {
   const text = String(title || '').trim();
   return !!teacher && text.startsWith(teacher) && text.includes('一對一') && !parseBookingTitle(text, teacher);
+}
+
+/**
+ * The teacher's own booking calendars (2026-11-12): one calendar per kind of class, so the calendar says
+ * Pilates or strength, and the title is only the student's name. Two students with the same name get
+ * a four-digit birthday after it: 王小明 0828.
+ */
+export const CALENDAR_KINDS = [['pilates', '皮拉提斯'], ['strength', '重訓'], ['shared', '公司共用']];
+
+/** A first guess from the calendar's name; the teacher can change it in 設定. */
+export function guessCalendarKind(name) {
+  const text = String(name || '').toLowerCase();
+  if (/皮拉提斯|pilates|器械|reformer/.test(text)) return 'pilates';
+  if (/重訓|肌力|weight|strength|健身/.test(text)) return 'strength';
+  return 'shared';
+}
+
+export function parsePlainTitle(title) {
+  const text = String(title || '').replace(/【[^】]*】/g, '').trim();
+  const match = text.match(/^(.+?)[\s　]*(\d{4})$/);
+  const student = (match ? match[1] : text).trim();
+  if (!student || student.length > 12) return null;
+  return { student, birthday: match ? match[2] : '' };
+}
+
+/** A birthday as four digits (月日), or '' when it is not one. */
+export function cleanBirthday(text) {
+  const digits = String(text || '').replace(/\D/g, '');
+  if (digits.length !== 4) return '';
+  const month = Number(digits.slice(0, 2));
+  const day = Number(digits.slice(2));
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31 ? digits : '';
+}
+
+/**
+ * Which student a booking is for. Same name (or another name for them) first; when the title has a birthday,
+ * only the student with that birthday. A title without one belongs to the only student of that name, or else to the
+ * only one of them with no birthday recorded. Anything unclear matches nobody rather than the wrong student.
+ */
+export function studentForEvent(students, event) {
+  const name = String(event?.student || '').trim();
+  if (!name) return null;
+  const same = students.filter((s) => !s.deleted && (s.name === name || (s.aliases || []).includes(name)));
+  const birthday = event.birthday || '';
+  if (birthday) {
+    // A birthday nobody has yet is a new namesake: mixing two people's records would be worse than a new card,
+    // which the teacher can still merge into the old one.
+    const exact = same.filter((s) => s.birthday === birthday);
+    return exact.length === 1 ? exact[0] : null;
+  }
+  if (same.length === 1) return same[0];
+  const plain = same.filter((s) => !s.birthday);
+  return plain.length === 1 ? plain[0] : null;
+}
+
+/** Several students share this name, all have birthdays, and the title has none: nobody can tell which. */
+export function bookingIsUnclear(students, event) {
+  if (!event?.student || event.birthday || studentForEvent(students, event)) return false;
+  const name = String(event.student).trim();
+  return students.filter((s) => !s.deleted && (s.name === name || (s.aliases || []).includes(name))).length > 1;
 }
 
 export function findStudentByName(students, name) {
@@ -248,10 +324,13 @@ export function dateWithWeek(key) {
 }
 
 /** The student's first booking after a day, read from the calendar. */
-export function nextBooking(student, events, today) {
-  const names = [student.name, ...(student.aliases || [])];
+export function nextBooking(student, events, today, students = [student]) {
   return events
-    .filter((e) => e.date > today && e.student && names.includes(e.student))
+    .filter((e) => {
+      if (e.date <= today) return false;
+      const found = studentForEvent(students, e);
+      return !!found && (found === student || (found.id && found.id === student.id));
+    })
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0] || null;
 }
 
@@ -261,8 +340,8 @@ export function nextBooking(student, events, today) {
  * A date picked in the app only counts while the calendar has no booking for the student yet.
  * source: 'calendar' | 'teacher' | '' (nothing known).
  */
-export function nextClassInfo(student, events, today) {
-  const booking = nextBooking(student, events, today);
+export function nextClassInfo(student, events, today, students = [student]) {
+  const booking = nextBooking(student, events, today, students);
   if (booking) return { date: booking.date, time: booking.time || '', confirmed: true, source: 'calendar' };
   if (student.nextClassDate > today) {
     return { date: student.nextClassDate, time: student.nextClassTime || '', confirmed: true, source: 'teacher' };
@@ -294,19 +373,28 @@ export function setLabel(row, set, useActual = true) {
   return { first: setLoad(row, set, useActual), reps: String(useActual ? set.reps : set.planReps) };
 }
 
-/** Builds spring notation in the teacher's own format, such as 1r1b or 2r l. */
-export function springToText(spring) {
-  const counts = SPRING_COLORS.filter((c) => spring.counts[c] > 0).map((c) => `${spring.counts[c]}${c}`).join('');
+/** Builds spring notation in the teacher's own format: 1r1b m, 1k1g T, 1y1rl. Colours follow the apparatus order. */
+export function springToText(spring, apparatus) {
+  const order = [...new Set([...springSet(apparatus).colors, ...SPRING_ORDER])];
+  const counts = order.filter((c) => spring.counts[c] > 0).map((c) => `${spring.counts[c]}${c}`).join('');
   return spring.bar ? `${counts}${counts ? ' ' : ''}${spring.bar}` : counts;
 }
 
 export function springFromText(text) {
-  const spring = { counts: { r: 0, b: 0, y: 0, g: 0 }, bar: '' };
+  const spring = { counts: Object.fromEntries(SPRING_ORDER.map((c) => [c, 0])), bar: '' };
   const value = String(text || '');
-  for (const match of value.matchAll(/(\d+)([rbyg])/g)) spring.counts[match[2]] = Number(match[1]);
-  const bar = value.match(/(?:^|\s)([lmh])\s*$/);
+  for (const match of value.matchAll(/(\d+)(rs|rl|[rbypkg])/g)) spring.counts[match[2]] = Number(match[1]);
+  const bar = value.match(/(?:^|\s)([lmhTHML])\s*$/);
   if (bar) spring.bar = bar[1];
   return spring;
+}
+
+/** Whether a saved setting can be used on an apparatus, so Chair presets never show on the Reformer. */
+export function springFits(text, apparatus) {
+  const spring = springFromText(text);
+  const set = springSet(apparatus);
+  const used = SPRING_ORDER.filter((c) => spring.counts[c] > 0);
+  return used.every((c) => set.colors.includes(c)) && (!spring.bar || set.positions.includes(spring.bar));
 }
 
 /** Keeps the newer copy of each record. Used on both the device and the Drive side. */
@@ -383,7 +471,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v20';
+export const APP_VERSION = 'v21';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -476,7 +564,7 @@ export function studentsNeedingPlan(events, students, plans, today) {
   const result = [];
   for (const event of events) {
     if (event.date < today) continue;
-    const student = findStudentByName(students, event.student);
+    const student = studentForEvent(students, event);
     if (!student || seen.has(student.id)) continue;
     seen.add(student.id);
     const plan = plans.find((p) => p.id === student.id);
@@ -672,10 +760,10 @@ export function learnAlternative(exercise, replacementId, limit = 8) {
 }
 
 /** The spring settings used most, so a usual setting takes one tap. */
-export function commonSprings(sessions, limit = 6) {
+export function commonSprings(sessions, limit = 6, keep = () => true) {
   const counts = new Map();
   for (const session of sessions) {
-    for (const row of session.rows || []) {
+    for (const row of (session.rows || []).filter(keep)) {
       for (const set of row.sets || []) {
         if (set.spring) counts.set(set.spring, (counts.get(set.spring) || 0) + 1);
       }
@@ -925,12 +1013,10 @@ export function layRegion(group) {
   return LAY_REGIONS[group] || group || '';
 }
 
-const SPRING_WORDS = { r: '紅', b: '藍', y: '黃', g: '綠' };
-
-/** The springs of one set as colours to draw and words to read: 紅 2・藍 1. */
-export function springParts(text) {
+/** The springs of one set as colours to draw and words to read: 紅 2・藍 1. Bar and hole stay out of the student report. */
+export function springParts(text, apparatus) {
   const spring = springFromText(text);
-  const colors = SPRING_COLORS.filter((c) => spring.counts[c] > 0);
+  const colors = [...new Set([...springSet(apparatus).colors, ...SPRING_ORDER])].filter((c) => spring.counts[c] > 0);
   return {
     dots: colors.flatMap((c) => Array(spring.counts[c]).fill(c)),
     words: colors.map((c) => `${SPRING_WORDS[c]} ${spring.counts[c]}`).join('・'),
@@ -956,7 +1042,7 @@ export function reportRows(session, history, find = () => null) {
     let amount;
     if (row.kind === 'pilates') {
       const last = [...done].reverse().find((s) => s.spring);
-      amount = last ? { type: 'spring', ...springParts(last.spring) } : { type: 'none' };
+      amount = last ? { type: 'spring', ...springParts(last.spring, exercise?.group) } : { type: 'none' };
     } else if (row.equipment === BAND) {
       amount = { type: 'band', color: row.band || '' };
     } else {

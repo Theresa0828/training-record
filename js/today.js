@@ -1,6 +1,6 @@
 import { h, button, go, tab, tabBar, refreshView } from './dom.js';
 import * as store from './store.js';
-import { dateKey, chosenCalendars, findStudentByName, doneSessions, studentsNeedingPlan, newId, nextClassNumber, classLabel } from './core.js';
+import { dateKey, chosenCalendars, studentForEvent, bookingIsUnclear, doneSessions, studentsNeedingPlan, newId, nextClassNumber, classLabel } from './core.js';
 import { nextDateText } from './classinfo.js';
 import { currentStatus, isConnected, syncNow } from './sync.js';
 import { loadDemo } from './demo.js';
@@ -12,14 +12,20 @@ export function kindLabel(kind) {
   return KIND[kind] || '';
 }
 
-/** Finds the student for a booking, creating one the first time a new name appears. */
-export function studentForBooking(name, demo) {
-  const existing = findStudentByName(store.all('students'), name);
+/** Finds the student for a booking, creating one the first time a new name (or name with birthday) appears. */
+export function studentForBooking(event) {
+  const existing = studentForEvent(store.all('students'), event);
   if (existing) return existing;
-  const student = { id: newId('s'), name, aliases: [], goal: '', contraindications: '', nextNotes: '', isNew: true };
-  if (demo) student.demo = true;
+  const student = { id: newId('s'), name: event.student, aliases: [], goal: '', contraindications: '', nextNotes: '', isNew: true };
+  if (event.birthday) student.birthday = event.birthday;
+  if (event.demo) student.demo = true;
   store.save('students', student);
   return student;
+}
+
+/** Two students with the same name are told apart by the birthday written after it in the calendar. */
+function birthdayTag(student) {
+  return student.birthday ? h('small', { class: 'name-birthday' }, ` ${student.birthday}`) : null;
 }
 
 function formatDate(key) {
@@ -34,7 +40,7 @@ function shortDate(key) {
 
 /** What is known about one of today's bookings. */
 function describe(event, today) {
-  const student = studentForBooking(event.student, event.demo);
+  const student = studentForBooking(event);
   const session = store.all('sessions').find((s) => s.studentId === student.id && s.date === today);
   const last = doneSessions(store.all('sessions'), student.id).find((s) => s.date !== today);
   const plan = store.get('plans', student.id);
@@ -56,7 +62,7 @@ function heroCard(item, span) {
       h('span', { class: 'hero-chip' }, kindLabel(event.kind), classText ? `・${classText}` : '')),
     h('div', { class: 'hero-main' },
       h('span', { class: 'hero-time' }, event.time),
-      h('span', { class: 'hero-name' }, student.name)),
+      h('span', { class: 'hero-name' }, student.name, birthdayTag(student))),
     h('p', { class: 'hero-meta' }, content, last ? `・上次 ${shortDate(last.date)}` : ''),
     (student.contraindications || student.nextNotes || needsProfile) && h('div', { class: 'hero-notes' },
       student.contraindications && h('div', { class: 'hero-note is-alert' }, icon('warn'), h('span', {}, student.contraindications)),
@@ -78,7 +84,7 @@ function slot(item) {
   h('span', { class: 'slot-dot' }, done ? icon('check') : ''),
   h('span', { class: 'slot-time' }, event.time),
   h('span', {},
-    h('span', { class: 'slot-name' }, student.name),
+    h('span', { class: 'slot-name' }, student.name, birthdayTag(student)),
     h('span', { class: 'slot-meta' }, done
       ? `${label}・已完成・${nextDateText(student)}`
       : `${label}・${content}${last ? `・上次 ${shortDate(last.date)}` : ''}`)),
@@ -97,13 +103,15 @@ function welcome() {
 export function todayView() {
   const today = dateKey();
   const events = store.all('events').sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
-  const readable = events.filter((e) => e.date === today && e.student);
+  // A title shared by namesakes with no birthday is listed as unclear instead of creating yet another student.
+  const unclear = events.filter((e) => bookingIsUnclear(store.all('students'), e));
+  const readable = events.filter((e) => e.date === today && e.student && !unclear.includes(e));
   const unreadable = events.filter((e) => e.unreadable);
   // A class already finished today is behind us, so it does not need planning.
   const finished = new Set(store.all('sessions').filter((s) => s.status === 'done').map((s) => `${s.studentId}|${s.date}`));
   const upcoming = events.filter((e) => {
-    if (!e.student) return false;
-    const student = findStudentByName(store.all('students'), e.student);
+    if (!e.student || unclear.includes(e)) return false;
+    const student = studentForEvent(store.all('students'), e);
     return !(student && finished.has(`${student.id}|${e.date}`));
   });
   // A class today without a plan simply starts from last time, so only later classes are listed as work to do.
@@ -149,6 +157,8 @@ export function todayView() {
       !items.length && !noCalendar && (connected || demo) && h('section', { class: 'empty rise span-6' }, reformer(), h('p', {}, '今天沒有你的預約。')),
       unreadable.length > 0 && h('p', { class: 'warn-text span-6' },
         `有 ${unreadable.length} 筆預約的標題讀不到學生姓名：${unreadable.map((e) => e.title).join('、')}`),
+      unclear.length > 0 && h('p', { class: 'warn-text span-6' },
+        `有 ${unclear.length} 筆預約分不出是哪一位同名的學生，請在日曆姓名後面加上生日：${[...new Set(unclear.map((e) => `${e.date.slice(5).replace('-', '/')} ${e.student}`))].join('、')}`),
       others.length > 0 && h('section', { class: 'stack rise span-6' },
         h('h2', { class: 'section-title' }, '今天的其他課'),
         h('div', { class: 'timeline' }, others.map(slot))),
@@ -161,7 +171,7 @@ export function todayView() {
         },
         h('span', { class: 'slot-dot task-dot' }, icon('plus')),
         h('span', { class: 'slot-time' }, shortDate(event.date)),
-        h('span', {}, h('span', { class: 'slot-name' }, student.name), h('span', { class: 'slot-meta' }, `${event.time} 上課，按這裡排課表`)),
+        h('span', {}, h('span', { class: 'slot-name' }, student.name, birthdayTag(student)), h('span', { class: 'slot-meta' }, `${event.time} 上課，按這裡排課表`)),
         icon('next', 'go')))))),
     tabBar('today'));
 }

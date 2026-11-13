@@ -1,7 +1,7 @@
 // Plans the next class: starts from last time, then the teacher tweaks it.
 import { h, button, holdButton, back, backButton, go, openSheet, toast, dismissActionToast } from './dom.js';
 import * as store from './store.js';
-import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, swapRow, commonSprings, moveRow, BAND } from './core.js';
+import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, swapRow, commonSprings, moveRow, BAND, springKind } from './core.js';
 import { exercisePicker, rememberSwaps } from './library.js';
 import { handoutButton } from './handout.js';
 import { springEditor } from './spring.js';
@@ -11,6 +11,17 @@ import { dragHandle } from './sortable.js';
 import { equipmentControl } from './equipment.js';
 import { lastClassCard } from './history.js';
 import { paramTile, paramChoice } from './param.js';
+
+/** The apparatus of a Pilates row, which decides its springs. */
+export function apparatusOf(row) {
+  return store.get('exercises', row.exerciseId)?.group || '';
+}
+
+/** The settings used most on the same kind of apparatus. */
+export function apparatusSprings(row, limit = 4) {
+  const kind = springKind(apparatusOf(row));
+  return commonSprings(store.all('sessions'), limit, (r) => r.kind === 'pilates' && springKind(apparatusOf(r)) === kind);
+}
 
 function loadPlan(studentId, history) {
   const saved = store.get('plans', studentId);
@@ -121,7 +132,7 @@ export function planView({ studentId }) {
             }
           });
           paint();
-        }, commonSprings(store.all('sessions'), 4)),
+        }, apparatusSprings(row), apparatusOf(row)),
         button('完成', close, 'big primary'));
       paint();
       return area;

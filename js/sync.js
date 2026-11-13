@@ -1,6 +1,6 @@
 // Talks to the Apps Script on the teacher's Google account. Runs only in the background.
 import * as store from './store.js';
-import { mergeRecords, fileForRecord, collectionForFile, parseBookingTitle, isUnreadableBooking, dateKey, chosenCalendars, mergeCalendarEvents } from './core.js';
+import { mergeRecords, fileForRecord, collectionForFile, parseBookingTitle, isUnreadableBooking, dateKey, chosenCalendars, mergeCalendarEvents, parsePlainTitle } from './core.js';
 
 const statusListeners = new Set();
 let status = { state: 'idle', message: '' };
@@ -115,20 +115,30 @@ async function syncCalendar() {
   const today = dateKey();
   const { teacher } = connection();
   // All or nothing: if one calendar cannot be read, the bookings already shown stay instead of half vanishing.
-  const lists = await Promise.all(ids.map((calendarId) => call('events', { calendarId, from: today }).then((data) => data.events)));
+  // Each calendar is Pilates, strength, or the shared company one whose titles carry the teacher's name (2026-11-12).
+  const kinds = store.getMeta('calendarKinds', {}) || {};
+  const lists = await Promise.all(ids.map((calendarId) => {
+    const kind = kinds[calendarId] || 'shared';
+    return call('events', { calendarId, from: today, all: kind !== 'shared' })
+      .then((data) => data.events.map((event) => ({ ...event, calendarKind: kind })));
+  }));
   const events = mergeCalendarEvents(lists);
   const signature = JSON.stringify(events.map((e) => [e.id, e.date, e.time, e.title]));
   const changed = calendarSignature !== null && signature !== calendarSignature;
   calendarSignature = signature;
   store.replaceEvents(events.map((event) => {
-    const parsed = parseBookingTitle(event.title, teacher);
+    const own = event.calendarKind !== 'shared';
+    // An old-style title still reads the same way on any calendar; otherwise the title is the student's name.
+    const formal = parseBookingTitle(event.title, teacher);
+    const parsed = formal || (own ? parsePlainTitle(event.title) : null);
     return {
       id: event.id,
       date: event.date,
       time: event.time,
       student: parsed ? parsed.student : '',
-      kind: parsed ? parsed.kind : 'strength',
-      unreadable: isUnreadableBooking(event.title, teacher),
+      birthday: parsed?.birthday || '',
+      kind: own ? event.calendarKind : parsed ? parsed.kind : 'strength',
+      unreadable: own ? !parsed : isUnreadableBooking(event.title, teacher),
       title: parsed ? '' : event.title,
     };
   }));

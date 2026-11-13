@@ -54,7 +54,7 @@ function termCard(session) {
 }
 
 function nextCard(student) {
-  const info = nextClassInfo(student, store.all('events'), dateKey());
+  const info = nextClassInfo(student, store.all('events'), dateKey(), store.all('students'));
   if (!info.date) return card('span-2', '下次上課', h('div', { class: 'rp-side' }, calendarPage(''), h('p', { class: 'rp-say' }, '和老師約時間')));
   const [hour, minute] = (info.time || '').split(':').map(Number);
   const time = info.time ? `${hour >= 12 ? '下午' : '上午'} ${hour > 12 ? hour - 12 : hour}:${String(minute).padStart(2, '0')}` : '';
