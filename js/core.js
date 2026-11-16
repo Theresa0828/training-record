@@ -6,11 +6,12 @@ export const DEFAULT_PROPS = ['滾筒', '彈力帶', '瑜珈球', 'Box'];
 export const APPARATUS = ['Reformer', 'Cadillac', 'Chair', 'Mat', 'Arc Barrel', 'Spine Corrector'];
 export const ASSIST_LEVELS = ['無', '少', '中', '多'];
 // Each apparatus has its own springs (2026-11-13). Reformer: red, blue, yellow, green and a low/middle/high bar.
-// Chair: black and green, hung in the Top/High/Middle/Low hole, written in capitals (1k1g T). Cadillac: yellow, purple, short red, long red, blue.
+// Chair: black and green, each colour hung in its own Top/High/Middle/Low hole, written in capitals after
+// the colour (1kT 1gL, 2026-11-16). Cadillac: yellow, purple, short red, long red, blue.
 export const SPRING_SETS = {
-  reformer: { colors: ['r', 'b', 'y', 'g'], positions: ['l', 'm', 'h'] },
-  chair: { colors: ['k', 'g'], positions: ['T', 'H', 'M', 'L'] },
-  cadillac: { colors: ['y', 'p', 'rs', 'rl', 'b'], positions: [] },
+  reformer: { colors: ['r', 'b', 'y', 'g'], positions: ['l', 'm', 'h'], holes: [] },
+  chair: { colors: ['k', 'g'], positions: [], holes: ['T', 'H', 'M', 'L'] },
+  cadillac: { colors: ['y', 'p', 'rs', 'rl', 'b'], positions: [], holes: [] },
 };
 const SPRING_ORDER = ['r', 'rs', 'rl', 'b', 'y', 'p', 'k', 'g'];
 export const SPRING_WORDS = { r: '紅', rs: '紅短', rl: '紅長', b: '藍', y: '黃', p: '紫', k: '黑', g: '綠' };
@@ -373,19 +374,29 @@ export function setLabel(row, set, useActual = true) {
   return { first: setLoad(row, set, useActual), reps: String(useActual ? set.reps : set.planReps) };
 }
 
-/** Builds spring notation in the teacher's own format: 1r1b m, 1k1g T, 1y1rl. Colours follow the apparatus order. */
+/** Builds spring notation in the teacher's own format: 1r1b m, 1kT 1gL, 1y1rl. Colours follow the apparatus order. */
 export function springToText(spring, apparatus) {
   const order = [...new Set([...springSet(apparatus).colors, ...SPRING_ORDER])];
-  const counts = order.filter((c) => spring.counts[c] > 0).map((c) => `${spring.counts[c]}${c}`).join('');
+  const holes = spring.holes || {};
+  const used = order.filter((c) => spring.counts[c] > 0);
+  const withHoles = used.some((c) => holes[c]);
+  const counts = used.map((c) => `${spring.counts[c]}${c}${holes[c] || ''}`).join(withHoles ? ' ' : '');
   return spring.bar ? `${counts}${counts ? ' ' : ''}${spring.bar}` : counts;
 }
 
 export function springFromText(text) {
-  const spring = { counts: Object.fromEntries(SPRING_ORDER.map((c) => [c, 0])), bar: '' };
+  const spring = { counts: Object.fromEntries(SPRING_ORDER.map((c) => [c, 0])), holes: {}, bar: '' };
   const value = String(text || '');
-  for (const match of value.matchAll(/(\d+)(rs|rl|[rbypkg])/g)) spring.counts[match[2]] = Number(match[1]);
+  for (const match of value.matchAll(/(\d+)(rs|rl|[rbypkg])([THML]?)/g)) {
+    spring.counts[match[2]] = Number(match[1]);
+    if (match[3]) spring.holes[match[2]] = match[3];
+  }
   const bar = value.match(/(?:^|\s)([lmhTHML])\s*$/);
-  if (bar) spring.bar = bar[1];
+  if (bar && /[lmh]/.test(bar[1])) spring.bar = bar[1];
+  // v21 wrote one Chair hole for every colour at the end (1k1g T); it now belongs to each colour without one.
+  if (bar && /[THML]/.test(bar[1])) {
+    for (const c of SPRING_ORDER) if (spring.counts[c] > 0 && !spring.holes[c]) spring.holes[c] = bar[1];
+  }
   return spring;
 }
 
@@ -394,7 +405,9 @@ export function springFits(text, apparatus) {
   const spring = springFromText(text);
   const set = springSet(apparatus);
   const used = SPRING_ORDER.filter((c) => spring.counts[c] > 0);
-  return used.every((c) => set.colors.includes(c)) && (!spring.bar || set.positions.includes(spring.bar));
+  return used.every((c) => set.colors.includes(c))
+    && Object.values(spring.holes).every((hole) => set.holes.includes(hole))
+    && (!spring.bar || set.positions.includes(spring.bar));
 }
 
 /** Keeps the newer copy of each record. Used on both the device and the Drive side. */
@@ -471,7 +484,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v21';
+export const APP_VERSION = 'v22';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];

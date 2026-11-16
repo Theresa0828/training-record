@@ -16,6 +16,7 @@ import { icon } from './icons.js';
 import { openPainSheet as openPainMap, painScores } from './painsheet.js';
 import { trendChart } from './trend.js';
 import { dragHandle } from './sortable.js';
+import { swipeToDelete } from './swipe.js';
 import { termRing } from './charts.js';
 import { equipmentControl } from './equipment.js';
 import { paramTile } from './param.js';
@@ -262,6 +263,8 @@ export function recordView({ studentId, kind }) {
       const swap = h('button', { type: 'button', class: 'grid-swap', 'aria-label': `換掉 ${row.name}`, onclick: () => openSwap(r) }, icon('swap'));
       const handle = dragHandle({ name: row.name, index: r, count: session.rows.length, getRow: () => rowEl, getList: () => tableBody, onMove: shiftRow });
       const rowEl = h('div', { class: 'grid-row' }, h('div', { class: 'grid-lead' }, handle, name, swap), sets);
+      // Swiping left shows 刪除 for the whole exercise; 復原 brings it back (2026-11-16).
+      swipeToDelete(rowEl, row.name, () => removeRowAt(r));
       tableBody.append(rowEl);
     });
     // The list keeps room for every exercise, so the whole class is visible without scrolling.
@@ -510,6 +513,8 @@ export function recordView({ studentId, kind }) {
           mutate(() => { set.done = false; });
           refresh();
         }, ''),
+        // Any set can go, down to one; the whole exercise goes with 移除動作 or a swipe (2026-11-16).
+        row.sets.length > 1 && holdButton('刪除這組', removeSet, 'ghost danger-text'),
         holdButton('移除動作', removeRow, 'ghost danger-text')),
     ];
   }
@@ -544,10 +549,26 @@ export function recordView({ studentId, kind }) {
     ];
   }
 
+  function removeSet() {
+    const r = selected.row;
+    const row = session.rows[r];
+    if (row.sets.length <= 1) return;
+    const number = SET_NAMES[selected.set];
+    mutate(() => row.sets.splice(selected.set, 1));
+    selected = { row: r, set: Math.min(selected.set, row.sets.length - 1) };
+    refresh();
+    toast(`已刪除 ${row.name} 第${number}組`, { label: '復原', run: undo });
+  }
+
   function removeRow() {
-    const name = session.rows[selected.row].name;
-    mutate(() => session.rows.splice(selected.row, 1));
-    selected = session.rows.length ? { row: Math.min(selected.row, session.rows.length - 1), set: 0 } : null;
+    removeRowAt(selected.row);
+  }
+
+  function removeRowAt(r) {
+    const name = session.rows[r].name;
+    mutate(() => session.rows.splice(r, 1));
+    const at = selected ? (selected.row > r ? selected.row - 1 : selected.row) : 0;
+    selected = session.rows.length ? { row: Math.min(at, session.rows.length - 1), set: 0 } : null;
     mode = 'set';
     buildGrid();
     refresh();
