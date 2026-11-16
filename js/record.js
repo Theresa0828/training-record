@@ -1,5 +1,6 @@
 // The in-class screen. A tap changes memory, updates only what it touched, and saves in the background.
-import { h, button, holdButton, backButton, go, home, openSheet, toast, dismissActionToast } from './dom.js';
+import { h, button, holdButton, backButton, back, go, home, openSheet, toast, dismissActionToast } from './dom.js';
+import { uploadRecord, isWaiting, isConnected } from './sync.js';
 import * as store from './store.js';
 import {
   MAX_SETS, DEFAULT_TAGS, DEFAULT_PROPS, chooserOptions, painList, painText, painShort, setPainMap, setText, rowDetails, exerciseHistory, exerciseTrend, ASSIST_LEVELS, dateKey, newId, makeRow, makeSet,
@@ -94,10 +95,25 @@ export function settleOldDrafts() {
   }
 }
 
-export function recordView({ studentId, kind }) {
+export function recordView({ studentId, kind, sessionId }) {
   const student = store.get('students', studentId);
-  let session = openSession(studentId, kind);
-  const previous = doneSessions(store.all('sessions'), studentId).find((s) => s.id !== session.id);
+  // A class from an earlier day opens as a copy (2026-11-16). Nothing is stored or uploaded while it is changed;
+  // 存檔上傳 stores it once and sends it at once, so Drive never gets half-finished versions.
+  const original = sessionId ? store.get('sessions', sessionId) : null;
+  const editing = !!original && original.date !== dateKey();
+  let session = editing ? JSON.parse(JSON.stringify(original)) : openSession(studentId, kind);
+  let dirty = false;
+  let uploadState = 'clean';
+  // Changes to a past class are kept on this iPad only (never sent) until 存檔上傳, so a closed tab loses nothing.
+  const drafts = () => ({ ...(store.getMeta('editDrafts', {}) || {}) });
+  const keepDraft = () => store.setMeta('editDrafts', { ...drafts(), [session.id]: { session: JSON.parse(JSON.stringify(session)), savedAt: Date.now() } });
+  const dropDraft = () => {
+    const all = drafts();
+    if (!all[session.id]) return;
+    delete all[session.id];
+    store.setMeta('editDrafts', all);
+  };
+  const previous = doneSessions(store.all('sessions'), studentId).find((s) => s.id !== session.id && s.date <= session.date);
   const undoStack = [];
   const firstOpenRow = Math.max(session.rows.findIndex((row) => row.sets.some((s) => !s.done)), 0);
   let selected = session.rows.length ? { row: firstOpenRow, set: firstOpenSet(session.rows[firstOpenRow]) } : null;
@@ -115,8 +131,10 @@ export function recordView({ studentId, kind }) {
   const vitalsFlags = h('button', { type: 'button', class: 'vital', onclick: () => setMode('vitals') });
   const noteButton = h('button', { type: 'button', class: 'vital', onclick: () => openNoteSheet() });
   const undoButton = h('button', { type: 'button', class: 'btn ghost undo', disabled: true, onclick: undo }, icon('undo'), h('span', {}, '復原'));
-  const finishButton = button(session.status === 'done' ? '更新完成' : '完成上課', () => openFinishSheet(), '');
-  const classChip = h('button', { type: 'button', class: 'class-chip', onclick: () => classNumberSheet(studentId, session, paintClassInfo) });
+  const finishButton = editing
+    ? h('button', { type: 'button', class: 'btn save-upload', onclick: () => confirmUpload() })
+    : button(session.status === 'done' ? '更新完成' : '完成上課', () => openFinishSheet(), '');
+  const classChip = h('button', { type: 'button', class: 'class-chip', disabled: editing, onclick: () => classNumberSheet(studentId, session, paintClassInfo) });
   const nextChip = h('button', { type: 'button', class: 'class-chip', onclick: () => nextDateSheet(studentId, paintClassInfo) });
   const guideText = h('span', { class: 'sr-only', role: 'status' });
   const addButton = h('button', { type: 'button', class: 'grid-add', 'aria-label': '加入動作', onclick: () => openPicker() }, icon('plus'), h('span', { class: 'grid-add-text' }, '加入動作'));
@@ -132,15 +150,112 @@ export function recordView({ studentId, kind }) {
     undoStack.push(JSON.stringify({ session, selected, mode: mode === 'vitals' ? 'set' : mode }));
     if (undoStack.length > UNDO_LIMIT) undoStack.shift();
     change();
-    store.save('sessions', session);
+    persist();
     undoButton.disabled = false;
+  }
+
+  /** Today's class is stored at every tap. A past class only marks that it has changes waiting for 存檔上傳. */
+  function persist() {
+    if (!editing) {
+      store.save('sessions', session);
+      return;
+    }
+    dirty = true;
+    uploadState = 'clean';
+    keepDraft();
+    paintSave();
+  }
+
+  function paintSave() {
+    if (!editing) return;
+    const [label, iconName, disabled] = dirty ? ['存檔上傳', 'sync', false]
+      : uploadState === 'uploading' ? ['上傳中…', 'sync', true]
+        : uploadState === 'uploaded' ? ['已上傳', 'check', true]
+          : uploadState === 'local' ? ['已存在 iPad', 'check', true]
+            : uploadState === 'pending' ? ['再上傳一次', 'sync', false]
+              : ['沒有修改', null, true];
+    finishButton.replaceChildren(iconName ? icon(iconName) : '', h('span', {}, label));
+    finishButton.disabled = disabled;
+    finishButton.classList.toggle('primary', dirty || uploadState === 'pending');
+    finishButton.classList.toggle('is-ready', dirty);
+    finishButton.classList.toggle('is-uploaded', !dirty && uploadState === 'uploaded');
+  }
+
+  function confirmUpload() {
+    if (!dirty && uploadState === 'pending') { upload(); return; }
+    openSheet('存檔並上傳', (close) => h('div', { class: 'stack' },
+      h('p', {}, `把 ${session.date.replaceAll('-', '/')} 這堂的修改存到 iPad，並上傳到公司 Google 雲端，取代雲端上原本的這一堂。`),
+      h('p', { class: 'muted' }, '上傳完成前請不要關閉工具。'),
+      h('div', { class: 'row-between' },
+        button('再看看', close, ''),
+        button('存檔上傳', () => { close(); upload(); }, 'primary'))));
+  }
+
+  async function upload() {
+    if (dirty) {
+      session.editedAt = new Date().toISOString();
+      // A separate copy is stored, so later changes on screen stay out of the saved class until the next 存檔上傳.
+      store.save('sessions', JSON.parse(JSON.stringify(session)));
+      dropDraft();
+      dirty = false;
+    }
+    uploadState = 'uploading';
+    paintSave();
+    const result = await uploadRecord('sessions', session.id);
+    uploadState = result === 'offline' ? 'pending' : result;
+    paintSave();
+    toast({
+      uploaded: '已上傳到雲端',
+      local: '已存在這台 iPad。還沒連 Google，所以沒有上傳。',
+      offline: '已存在 iPad，但現在沒有網路。連上網路後按「再上傳一次」。',
+      pending: '已存在 iPad，但上傳沒有成功。等一下再按「再上傳一次」。',
+    }[result]);
+  }
+
+  /** Leaving a past class with changes not uploaded asks first. The changes stay on this iPad unless thrown away. */
+  function leave(then) {
+    if (!dirty) { then(); return; }
+    openSheet('還沒存檔', (close) => h('div', { class: 'stack' },
+      h('p', {}, '這堂的修改暫存在這台 iPad，還沒上傳到雲端。'),
+      h('div', { class: 'stack' },
+        button('繼續修改', close, 'big primary'),
+        button('先離開，保留暫存', () => {
+          close();
+          toast('修改暫存在這台 iPad。紀錄清單會標「還沒存檔」，記得回來按「存檔上傳」。');
+          then();
+        }, ''),
+        holdButton('放棄修改', () => { dropDraft(); close(); then(); }, 'ghost danger-text'))));
+  }
+
+  /** A past class with changes left from last time offers to carry on with them. */
+  function offerDraft() {
+    const saved = drafts()[session.id];
+    if (!saved?.session) return;
+    const when = new Date(saved.savedAt);
+    const stamp = `${when.getMonth() + 1}/${when.getDate()} ${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`;
+    openSheet('上次還沒存檔', (close) => h('div', { class: 'stack' },
+      h('p', {}, `這堂有上次改到一半的內容（${stamp} 暫存在這台 iPad），還沒上傳。要接著改嗎？`),
+      h('div', { class: 'stack' },
+        button('接著改', () => {
+          close();
+          session = JSON.parse(JSON.stringify(saved.session));
+          dirty = true;
+          uploadState = 'clean';
+          if (selected && (!session.rows[selected.row] || !session.rows[selected.row].sets[selected.set])) {
+            selected = session.rows.length ? { row: 0, set: 0 } : null;
+          }
+          buildGrid();
+          refresh();
+          paintSave();
+        }, 'big primary'),
+        holdButton('不要，用原本的', () => { dropDraft(); close(); }, 'ghost danger-text'))));
   }
 
   function undo() {
     if (!undoStack.length) return;
     dismissActionToast();
     ({ session, selected, mode } = JSON.parse(undoStack.pop()));
-    store.save('sessions', session);
+    persist();
     undoButton.disabled = undoStack.length === 0;
     if (selected && (!session.rows[selected.row] || !session.rows[selected.row].sets[selected.set])) {
       selected = session.rows.length ? { row: 0, set: 0 } : null;
@@ -340,6 +455,7 @@ export function recordView({ studentId, kind }) {
     if (mode === 'vitals') return '先量血壓和心跳，輸入完會自動跳下一格';
     if (!session.rows.length) return '先加入第一個動作';
     const row = selected && session.rows[selected.row];
+    if (editing && isAllDone()) return '改好後按右上角「存檔上傳」';
     if (isAllDone()) return `全部做完了，按右上角「${session.status === 'done' ? '更新完成' : '完成上課'}」`;
     if (!row) return '點一個動作開始';
     if (mode === 'feel') return `${row.name} 做完了，記一下費力和感受`;
@@ -355,8 +471,10 @@ export function recordView({ studentId, kind }) {
   function paintGuide() {
     const allDone = isAllDone();
     const anyDone = session.rows.some((row) => row.sets.some((s) => s.done));
-    finishButton.classList.toggle('primary', allDone);
-    finishButton.classList.toggle('is-ready', allDone && session.status !== 'done');
+    if (!editing) {
+      finishButton.classList.toggle('primary', allDone);
+      finishButton.classList.toggle('is-ready', allDone && session.status !== 'done');
+    }
     const vitalsDue = mode === 'vitals' || (session.status === 'draft' && !session.bpSys && !session.hr && !anyDone);
     vitalsBp.classList.toggle('is-next', vitalsDue);
     vitalsHr.classList.toggle('is-next', mode === 'vitals');
@@ -545,7 +663,7 @@ export function recordView({ studentId, kind }) {
         feelBox('備註', 'tag', chooserOptions(DEFAULT_TAGS, addedOptions('tag'), row.tags), row.tags, (v) => change(() => toggleIn(row.tags, v)),
           { className: 'is-wide feel-tags', extra: button('＋ 新增', () => openOptionSheet('tag', '備註標籤', DEFAULT_TAGS, row.tags), 'chip-btn chip-add') })),
       next !== -1 && h('button', { type: 'button', class: 'btn big primary pinned', onclick: () => tapRow(next) }, `下一個：${session.rows[next].name}`, icon('arrow')),
-      next === -1 && isAllDone() && h('button', { type: 'button', class: 'btn big primary pinned', onclick: () => openFinishSheet() }, session.status === 'done' ? '更新完成' : '完成上課', icon('arrow')),
+      next === -1 && isAllDone() && !editing && h('button', { type: 'button', class: 'btn big primary pinned', onclick: () => openFinishSheet() }, session.status === 'done' ? '更新完成' : '完成上課', icon('arrow')),
     ];
   }
 
@@ -715,7 +833,7 @@ export function recordView({ studentId, kind }) {
       scores: painScores(row),
       note: row.painNote,
       onScores: (map) => mutate(() => setPainMap(row, map)),
-      onNote: (value) => { row.painNote = value; store.save('sessions', session); },
+      onNote: (value) => { row.painNote = value; persist(); },
       onDone: refresh,
     });
   }
@@ -735,7 +853,7 @@ export function recordView({ studentId, kind }) {
         paintVitals();
         after();
       },
-      onNote: (value) => { session.dayPain = { ...(session.dayPain || {}), painNote: value }; store.save('sessions', session); },
+      onNote: (value) => { session.dayPain = { ...(session.dayPain || {}), painNote: value }; persist(); },
       onDone: after,
     });
   }
@@ -803,7 +921,7 @@ export function recordView({ studentId, kind }) {
       const save = () => {
         session.special = special.value;
         session.note = note.value;
-        store.save('sessions', session);
+        persist();
         paintVitals();
       };
       special.addEventListener('input', save);
@@ -849,11 +967,13 @@ export function recordView({ studentId, kind }) {
 
   const screen = h('div', { class: 'screen record' },
     h('header', { class: 'topbar' },
-      backButton(),
-      h('h1', {}, student.name, h('small', {}, kindLabel(session.kind))),
-      h('div', { class: 'class-chips' }, classChip, nextChip),
+      editing
+        ? h('button', { type: 'button', class: 'btn ghost back', 'aria-label': '返回', onclick: () => leave(back) }, icon('back'), h('span', {}, '返回'))
+        : backButton(),
+      h('h1', {}, student.name, h('small', {}, editing ? `${session.date.slice(5).replace('-', '/')} 修改中` : kindLabel(session.kind))),
+      h('div', { class: 'class-chips' }, classChip, !editing && nextChip),
       h('div', { class: 'topbar-actions' },
-        button('總覽', () => go('overview', { studentId }), 'ghost'),
+        button('總覽', () => leave(() => go('overview', { studentId })), 'ghost'),
         undoButton,
         finishButton)),
     (student.contraindications || student.nextNotes) && h('div', { class: 'banner' },
@@ -873,6 +993,14 @@ export function recordView({ studentId, kind }) {
 
   tableBody.parentElement.style.setProperty('--rows', String(Math.max(session.rows.length, 1)));
   refresh();
+  if (editing) {
+    paintSave();
+    offerDraft();
+    // A class stored earlier but never sent says so at once.
+    isWaiting('sessions', session.id).then((waiting) => {
+      if (waiting && !dirty && isConnected()) { uploadState = 'pending'; paintSave(); }
+    });
+  }
   return screen;
 }
 

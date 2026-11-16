@@ -1,6 +1,7 @@
 // Who this student is right now, readable in three seconds. Each card shows one point; a tap gives the detail.
 import { h, button, holdButton, backButton, go, back, home, openSheet, confirmSheet, toast, refreshView } from './dom.js';
 import * as store from './store.js';
+import { isConnected, isWaiting } from './sync.js';
 import { classNumberSheet, nextDateSheet } from './classinfo.js';
 import {
   dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, studentForEvent, cleanBirthday, recentPain, learnedSummary, pilatesLevel,
@@ -114,10 +115,34 @@ function editProfileSheet(student) {
   });
 }
 
+// Each past class can be opened again and changed (2026-11-16). The change is stored and sent only with 存檔上傳,
+// and the list says which classes are still waiting to reach Drive.
 function historySheet(history) {
-  openSheet(`過去紀錄（${history.length}）`, () => h('div', { class: 'stack-sm' }, history.map((session) => button(sessionTitle(session), () => {
-    openSheet(session.date.replaceAll('-', '/'), () => h('div', { class: 'stack-sm' }, sessionFacts(session), sessionTable(session)), { wide: true });
-  }, 'list-item'))));
+  openSheet(`過去紀錄（${history.length}）`, (closeList) => {
+    const items = history.map((session) => {
+      const badge = h('span', { class: 'upload-badge' });
+      const item = button([h('span', {}, sessionTitle(session)), badge], () => {
+        openSheet(session.date.replaceAll('-', '/'), (close) => h('div', { class: 'stack-sm' },
+          h('div', { class: 'row-between' },
+            h('span', { class: 'muted small' }, session.editedAt ? `修改過 ${session.editedAt.slice(5, 10).replace('-', '/')}` : ''),
+            button([icon('pencil'), h('span', {}, '編輯這堂')], () => {
+              close();
+              closeList();
+              go('record', { studentId: session.studentId, sessionId: session.id });
+            }, '')),
+          sessionFacts(session), sessionTable(session)), { wide: true });
+      }, 'list-item history-item');
+      // Changes kept on this iPad but not yet saved come first; then saved ones still waiting for Drive.
+      if ((store.getMeta('editDrafts', {}) || {})[session.id]) badge.textContent = '還沒存檔';
+      else if (isConnected()) {
+        isWaiting('sessions', session.id).then((waiting) => {
+          if (waiting) badge.textContent = '還沒上傳';
+        });
+      }
+      return item;
+    });
+    return h('div', { class: 'stack-sm' }, items);
+  });
 }
 
 function pdfSheet(student, history) {

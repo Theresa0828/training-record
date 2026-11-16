@@ -15,6 +15,7 @@ const PATHS = {
   warn: 'M12 4l9 16H3zM12 10v4M12 17.5v.1',
   sync: 'M4 12a8 8 0 0113.7-5.7L20 8.5M20 4v4.5h-4.5M20 12a8 8 0 01-13.7 5.7L4 15.5M4 20v-4.5h4.5',
   plus: 'M12 5v14M5 12h14',
+  pencil: 'M4 20l1-5L16 4l4 4L9 19zM14 6l4 4',
   trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
   up: 'M12 20V5M6 11l6-6 6 6',
   down: 'M12 4v15M6 13l6 6 6-6',

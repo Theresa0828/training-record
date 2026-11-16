@@ -172,6 +172,26 @@ export async function syncNow() {
   }
 }
 
+/**
+ * Sends one record now and says whether it reached Drive (2026-11-16, editing a past class).
+ * 'uploaded', 'pending' (still queued, e.g. the round failed), 'offline', or 'local' when no Google account is paired.
+ */
+export async function uploadRecord(collection, id) {
+  if (!isConnected()) return 'local';
+  if (!navigator.onLine) return 'offline';
+  await store.flush();
+  // Wait for a round already running, then run one that includes this record.
+  for (let waited = 0; running && waited < REQUEST_TIMEOUT_MS * 2; waited += 200) await new Promise((r) => setTimeout(r, 200));
+  await syncNow();
+  return (await isWaiting(collection, id)) ? 'pending' : 'uploaded';
+}
+
+/** Whether a record still waits in the queue for Drive. */
+export async function isWaiting(collection, id) {
+  const outbox = await store.readOutbox();
+  return outbox.some((item) => item.collection === collection && item.recordId === id);
+}
+
 export function syncSoon(delay = 5000) {
   clearTimeout(timer);
   timer = setTimeout(syncNow, delay);
