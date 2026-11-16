@@ -39,9 +39,13 @@ function startDrag(event, { handle, rowEl, list, index, onDrop }) {
     const centre = self.centre + moved;
     target = index;
     boxes.forEach((box, i) => {
-      if (i > index && centre > box.centre) target = i;
-      if (i < index && centre < box.centre && target >= index) target = i;
+      if (i > index && centre >= box.centre) target = i;
+      if (i < index && centre <= box.centre && target >= index) target = i;
     });
+    // Held against the top or bottom of the list it goes first or last, even when rows differ in height.
+    // Comparing centres alone left the first and last places out of reach (2026-11-16).
+    if (moved <= lowest && lowest < 0) target = 0;
+    if (moved >= highest && highest > 0) target = boxes.length - 1;
     rowEls.forEach((el, i) => {
       if (i === index) return;
       const shift = i > index && i <= target ? -(self.height + gap) : i < index && i >= target ? self.height + gap : 0;
