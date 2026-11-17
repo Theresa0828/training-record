@@ -502,7 +502,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v25';
+export const APP_VERSION = 'v26';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -604,6 +604,36 @@ export function studentsNeedingPlan(events, students, plans, today) {
   return result;
 }
 
+// Past this many reps the estimate drifts too far, so those sets do not count (2026-11-17).
+export const ONE_RM_MAX_REPS = 12;
+
+/** Estimated one-rep max from one set (Epley), rounded to 0.5 kg. 0 when the set cannot tell. */
+export function estimateOneRm(weight, reps) {
+  const w = Number(weight) || 0;
+  const r = Number(reps) || 0;
+  if (w <= 0 || r < 1 || r > ONE_RM_MAX_REPS) return 0;
+  return r === 1 ? w : Math.round(w * (1 + r / 30) * 2) / 2;
+}
+
+/** Weight × reps of every finished strength set in one class. Bands have no weight, so they add nothing. */
+export function sessionVolume(session) {
+  let total = 0;
+  for (const row of session.rows || []) {
+    if (row.kind !== 'strength' || row.equipment === BAND) continue;
+    for (const set of row.sets || []) if (set.done) total += (Number(set.weight) || 0) * (Number(set.reps) || 0);
+  }
+  return Math.round(total);
+}
+
+/** Training volume of recent classes that lifted anything, oldest first. */
+export function volumeSeries(history, limit = 12) {
+  return history
+    .map((session) => ({ date: session.date, volume: sessionVolume(session) }))
+    .filter((point) => point.volume > 0)
+    .slice(0, limit)
+    .reverse();
+}
+
 /** Weight per session for the overview trend, oldest first. */
 export function exerciseTrend(exerciseId, history, limit = 8) {
   const points = [];
@@ -615,7 +645,18 @@ export function exerciseTrend(exerciseId, history, limit = 8) {
     if (equipment && row.equipment && row.equipment !== equipment) continue;
     equipment = equipment || row.equipment || '';
     const done = row.sets.filter((s) => s.done);
-    if (done.length) points.push({ date: session.date, weight: Math.max(...done.map((s) => s.weight)), reps: Math.max(...done.map((s) => s.reps)) });
+    if (done.length) {
+      // The set the estimate came from, so the chart can say which one it was.
+      const best = done.reduce((top, s) => (estimateOneRm(s.weight, s.reps) > estimateOneRm(top.weight, top.reps) ? s : top), done[0]);
+      const e1rm = estimateOneRm(best.weight, best.reps);
+      points.push({
+        date: session.date,
+        weight: Math.max(...done.map((s) => s.weight)),
+        reps: Math.max(...done.map((s) => s.reps)),
+        e1rm,
+        e1rmSet: e1rm ? `${best.weight} kg × ${best.reps} 下` : '',
+      });
+    }
     if (points.length === limit) break;
   }
   return points.reverse();
@@ -626,7 +667,7 @@ export function trendScale(values) {
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min;
-  const step = [1, 2, 2.5, 5, 10, 20, 25, 50, 100].find((s) => span / s <= 3) || Math.ceil(span / 3);
+  const step = [1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000].find((s) => span / s <= 3) || Math.ceil(span / 3);
   let low = Math.floor(min / step) * step;
   let high = Math.ceil(max / step) * step;
   if (low === high) {
@@ -1133,4 +1174,33 @@ export function reportPain(session, history) {
     const earlier = history.map(classPain).find((map) => part in map);
     return { part, score, before: earlier ? earlier[part] : null };
   });
+}
+
+// 對位拍照的角度（2026-11-17，參考其他治療師的工具）。同一個角度的照片會疊在取景框上對齊。
+export const PHOTO_ANGLES = [
+  { id: 'front', label: '體態正面' },
+  { id: 'side', label: '體態側面' },
+  { id: 'back', label: '體態背面' },
+  { id: 'squat', label: '深蹲' },
+  { id: 'hinge', label: '硬舉' },
+  { id: 'single-leg', label: '單腳站' },
+  { id: 'bend', label: '前彎' },
+  { id: 'gait', label: '步態' },
+  { id: 'other', label: '其他' },
+];
+
+export function photoAngleLabel(id) {
+  return PHOTO_ANGLES.find((angle) => angle.id === id)?.label || '其他';
+}
+
+/** One student's photos of one angle (or all angles), newest first. */
+export function photosOf(photos, studentId, angle = null) {
+  return photos
+    .filter((p) => !p.deleted && p.studentId === studentId && (!angle || p.angle === angle))
+    .sort((a, b) => (b.date + (b.takenAt || 0)).localeCompare(a.date + (a.takenAt || 0)) || (b.takenAt || 0) - (a.takenAt || 0));
+}
+
+/** Drive file name, readable in the folder: 2026-11-17_王小明_體態正面. The photo id is added by Drive. */
+export function photoFileName(photo, studentName) {
+  return [photo.date, String(studentName || '').trim() || '學生', photoAngleLabel(photo.angle)].join('_');
 }

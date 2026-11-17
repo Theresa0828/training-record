@@ -1,6 +1,6 @@
 // Talks to the Apps Script on the teacher's Google account. Runs only in the background.
 import * as store from './store.js';
-import { mergeRecords, fileForRecord, collectionForFile, parseBookingTitle, isUnreadableBooking, dateKey, chosenCalendars, mergeCalendarEvents, parsePlainTitle } from './core.js';
+import { mergeRecords, fileForRecord, collectionForFile, parseBookingTitle, isUnreadableBooking, dateKey, chosenCalendars, mergeCalendarEvents, parsePlainTitle, photoFileName } from './core.js';
 
 const statusListeners = new Set();
 let status = { state: 'idle', message: '' };
@@ -109,6 +109,63 @@ async function syncRecords() {
   store.setMeta('fileVersions', data.versions || {});
 }
 
+// Photos (2026-11-17). Their small records travel with the other data; the images go one by one.
+// An Apps Script deployed before photos existed answers 'unknown action': photos then wait on the iPad.
+let photoProblem = '';
+
+export function photoUploadProblem() {
+  return photoProblem;
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function syncPhotos() {
+  photoProblem = '';
+  const isDemo = (photo) => store.get('students', photo.studentId)?.demo;
+  for (const photo of store.all('photos')) {
+    if (photo.driveId || isDemo(photo)) continue;
+    const blob = await store.readPhotoBlob(photo.id);
+    if (!blob) continue;
+    const student = store.get('students', photo.studentId);
+    try {
+      const data = await call('photo', { id: photo.id, name: photoFileName(photo, student?.name || ''), data: await blobToBase64(blob) });
+      store.save('photos', { ...store.get('photos', photo.id), driveId: data.fileId });
+    } catch (error) {
+      photoProblem = /unknown action/.test(error.message) ? '照片還沒上傳：雲端連線程式要更新（照設定步驟重新部署）' : `照片上傳失敗：${error.message}`;
+      return;
+    }
+  }
+  // Deleted photos go to the Drive trash; undo brings them back.
+  for (const record of store.allIncludingDeleted('photos')) {
+    if (!record.driveId || !!record.deleted === !!record.driveTrashed) continue;
+    try {
+      await call('photoTrash', { fileId: record.driveId, trashed: !!record.deleted });
+      store.save('photos', { ...store.get('photos', record.id), driveTrashed: !!record.deleted });
+    } catch (error) {
+      photoProblem = `照片刪除還沒同步：${error.message}`;
+      return;
+    }
+  }
+}
+
+/** The image of a photo: from this iPad, or fetched once from Drive and kept here. */
+export async function photoBlob(photo) {
+  const local = await store.readPhotoBlob(photo.id);
+  if (local || !photo.driveId || !isConnected()) return local;
+  const data = await call('photoGet', { fileId: photo.driveId });
+  const bytes = Uint8Array.from(atob(data.data), (c) => c.charCodeAt(0));
+  const blob = new Blob([bytes], { type: 'image/jpeg' });
+  await store.savePhotoBlob(photo.id, blob);
+  return blob;
+}
+
 async function syncCalendar() {
   const ids = chosenCalendars(store.getMeta('calendarIds'), store.getMeta('calendarId'));
   if (!ids.length) return;
@@ -157,10 +214,13 @@ export async function syncNow() {
   setStatus('syncing', '同步中');
   try {
     await syncRecords();
+    await syncPhotos();
+    // A photo that just got its Drive copy sends its record in the same round.
+    if (store.all('photos').some((p) => p.driveId) && (await store.readOutbox()).some((item) => item.collection === 'photos')) await syncRecords();
     await syncCalendar();
     store.setMeta('lastSyncAt', Date.now());
     const now = new Date();
-    setStatus('ok', `已同步 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+    setStatus(photoProblem ? 'error' : 'ok', photoProblem || `已同步 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
   } catch (error) {
     setStatus('error', `同步失敗：${error.message}。紀錄仍在這台裝置。`);
   } finally {

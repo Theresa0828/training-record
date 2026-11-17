@@ -5,12 +5,13 @@ import { isConnected, isWaiting } from './sync.js';
 import { classNumberSheet, nextDateSheet } from './classinfo.js';
 import {
   dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, studentForEvent, cleanBirthday, recentPain, learnedSummary, pilatesLevel,
-  weightTrends, painSeries, overallStatus, bodyCompSummary, painList, painText, setPainMap,
+  weightTrends, volumeSeries, ONE_RM_MAX_REPS, painSeries, overallStatus, bodyCompSummary, painList, painText, setPainMap,
 } from './core.js';
 import { openPainSheet, painScores } from './painsheet.js';
 import { exportPdf } from './print.js';
 import { icon } from './icons.js';
-import { trendChart } from './trend.js';
+import { trendChart, volumeChart } from './trend.js';
+import { photoSheet } from './photos.js';
 import { termRing, calendarPage, sparkline, painBars, learnedTile, qualityDots } from './charts.js';
 import { bodyMap } from './bodymap.js';
 import { sessionTable, sessionFacts, sessionTitle } from './history.js';
@@ -267,11 +268,40 @@ function changeText(change) {
   return `${change > 0 ? '+' : '−'}${Math.abs(change)} kg`;
 }
 
+// Volume per class on top, then one chart per exercise: heaviest set, or the estimated 1RM (2026-11-17).
+function weightSheet(history, all) {
+  openSheet('重量趨勢', () => {
+    const width = Math.min(window.innerWidth, 620) - 48;
+    const volumes = volumeSeries(history);
+    let metric = 'weight';
+    const tabs = h('div', { class: 'segmented' });
+    const charts = h('div', { class: 'stack' });
+    const draw = () => {
+      tabs.replaceChildren(
+        button('最重一組', () => { metric = 'weight'; draw(); }, 'chip-btn', { 'aria-pressed': String(metric === 'weight') }),
+        button('推估最大重量', () => { metric = 'e1rm'; draw(); }, 'chip-btn', { 'aria-pressed': String(metric === 'e1rm') }));
+      const items = all
+        .map((item) => (metric === 'e1rm' ? { ...item, points: item.points.filter((p) => p.e1rm > 0) } : item))
+        .filter((item) => item.points.length >= 2);
+      charts.replaceChildren(...[
+        metric === 'e1rm' && h('p', { class: 'muted small' }, `用每組的重量和次數推算只做 1 下的最大重量（Epley 公式），超過 ${ONE_RM_MAX_REPS} 下的組不算。只是估計，不用真的去測。`),
+        ...(items.length
+          ? items.map((item) => trendChart(item.name, item.points, width, metric))
+          : [h('p', { class: 'muted' }, '同一個動作上過兩堂，就會出現趨勢。')]),
+      ].filter(Boolean));
+    };
+    draw();
+    return h('div', { class: 'stack' },
+      volumes.length > 0 && volumeChart(volumes, width),
+      all.length > 0 && tabs,
+      charts);
+  }, { wide: true });
+}
+
 function weightCard(history, span) {
   const trends = weightTrends(history, 2);
   const all = weightTrends(history, 12);
-  return card(span, '重量趨勢', null, () => openSheet('重量趨勢', () => h('div', { class: 'stack' },
-    all.length ? all.map((item) => trendChart(item.name, item.points, Math.min(window.innerWidth, 620) - 48)) : h('p', { class: 'muted' }, '同一個動作上過兩堂，就會出現趨勢。')), { wide: true }),
+  return card(span, '重量趨勢', null, () => weightSheet(history, all),
   trends.length
     ? h('span', { class: 'series-list' }, trends.map((item) => h('span', { class: 'series-row is-stacked' },
       h('span', { class: 'series-name' }, item.name),
@@ -430,6 +460,7 @@ export function overviewView({ studentId }) {
         history.length > 0 && button(`紀錄 ${history.length}`, () => historySheet(history), 'ghost', { 'aria-label': `過去紀錄，共 ${history.length} 堂` }),
         history.length > 0 && button('PDF', () => pdfSheet(student, history), 'ghost', { 'aria-label': '匯出 PDF' }),
         history.length > 0 && button('給學生看', () => go('report', { studentId: student.id }), 'ghost'),
+        button('照片', () => photoSheet(student), 'ghost', { 'aria-label': '照片與對位拍照' }),
         button('編輯資料', () => editProfileSheet(student), 'ghost'))),
     h('main', { class: 'page bento' },
       textCard(student, 'span-3', '疼痛與禁忌', 'warn', student.contraindications, '還沒填寫，點一下填寫', 'is-alert'),

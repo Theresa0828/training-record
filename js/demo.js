@@ -104,6 +104,13 @@ export function loadDemo() {
 }
 
 export function clearDemo() {
+  // Photos taken while trying the app on a sample student go with that student, before they could ever upload.
+  for (const photo of store.allIncludingDeleted('photos')) {
+    if (store.get('students', photo.studentId)?.demo) {
+      store.removeLocal('photos', photo.id);
+      store.removePhotoBlob(photo.id).catch(() => {});
+    }
+  }
   for (const collection of ['students', 'exercises', 'sessions', 'plans', 'events']) {
     for (const record of store.all(collection)) {
       // A sample exercise linked to a handout is part of the handout library now: keep it.

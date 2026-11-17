@@ -3,13 +3,15 @@ import { SEED_EXERCISES, REMOVED_SEEDS } from './seed.js';
 
 const REMOVED_IDS = new Set(REMOVED_SEEDS.map((exercise) => exercise.id));
 const DB_NAME = 'training-record';
-const COLLECTIONS = ['students', 'exercises', 'sessions', 'plans', 'events', 'options'];
+const COLLECTIONS = ['students', 'exercises', 'sessions', 'plans', 'events', 'options', 'photos'];
 // Handout text and images stay on this device: never in memory, never synced.
 const HANDOUT_STORES = ['handout', 'handoutImages'];
-const STORES = [...COLLECTIONS, 'outbox', 'meta', ...HANDOUT_STORES];
+// Photo files stay out of memory; only their small records (who, when, which angle) are synced as data (2026-11-17).
+const PHOTO_STORE = 'photoBlobs';
+const STORES = [...COLLECTIONS, 'outbox', 'meta', ...HANDOUT_STORES, PHOTO_STORE];
 
 let db = null;
-const memory = { students: new Map(), exercises: new Map(), sessions: new Map(), plans: new Map(), events: new Map(), options: new Map() };
+const memory = { students: new Map(), exercises: new Map(), sessions: new Map(), plans: new Map(), events: new Map(), options: new Map(), photos: new Map() };
 const meta = new Map();
 const listeners = new Set();
 const saveErrorListeners = new Set();
@@ -22,7 +24,7 @@ export function onSaveError(listener) {
 
 function open() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 3);
+    const request = indexedDB.open(DB_NAME, 4);
     request.onupgradeneeded = () => {
       for (const name of STORES) {
         if (!request.result.objectStoreNames.contains(name)) {
@@ -74,6 +76,11 @@ export function all(collection) {
   // A removed starter exercise stays gone even if this device or Drive holds an older copy of it.
   return [...memory[collection].values()].filter((r) => !r.deleted
     && !(collection === 'exercises' && (REMOVED_IDS.has(r.id) || isSamplePilates(r))));
+}
+
+/** Every record, deleted ones too (their Drive copies still need tidying). */
+export function allIncludingDeleted(collection) {
+  return [...memory[collection].values()];
 }
 
 export function get(collection, id) {
@@ -207,6 +214,12 @@ export function eraseStudent(studentId) {
     if (session.studentId === studentId) stamp('sessions', session);
   }
   if (memory.plans.has(studentId)) stamp('plans', memory.plans.get(studentId));
+  for (const photo of memory.photos.values()) {
+    if (photo.studentId !== studentId || photo.deleted) continue;
+    // The Drive copy goes to the trash on the next sync; the file on this iPad goes now.
+    save('photos', { ...photo, deleted: true, erased: true });
+    removePhotoBlob(photo.id).catch(() => {});
+  }
   if (memory.students.has(studentId)) stamp('students', memory.students.get(studentId));
 }
 
@@ -225,6 +238,42 @@ async function readHandoutRecord(name, id) {
   } catch {
     db = await open();
     return readOne(name, id);
+  }
+}
+
+/** The image file of one photo on this device, or null when only Drive has it. */
+export async function readPhotoBlob(id) {
+  return (await readHandoutRecord(PHOTO_STORE, id))?.blob || null;
+}
+
+function writePhotoBlob(id, blob, remove = false) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_STORE, 'readwrite');
+    if (remove) tx.objectStore(PHOTO_STORE).delete(id);
+    else tx.objectStore(PHOTO_STORE).put({ id, blob });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+/** Written at once, not batched: a photo must be on disk before it is shown as taken. */
+export async function savePhotoBlob(id, blob) {
+  try {
+    await writePhotoBlob(id, blob);
+  } catch (error) {
+    if (error?.name === 'QuotaExceededError') throw error;
+    db = await open();
+    await writePhotoBlob(id, blob);
+  }
+}
+
+export async function removePhotoBlob(id) {
+  try {
+    await writePhotoBlob(id, null, true);
+  } catch {
+    db = await open();
+    await writePhotoBlob(id, null, true);
   }
 }
 
