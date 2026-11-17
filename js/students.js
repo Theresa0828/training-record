@@ -27,7 +27,7 @@ export function studentsView() {
     list.replaceChildren(
       ...matches.map(row),
       ...(query && !students.some((s) => s.name === query)
-        ? [button(`新增「${query}」`, () => go('overview', { studentId: studentForBooking(query, false).id }), 'big primary')]
+        ? [button(`新增「${query}」`, () => go('overview', { studentId: studentForBooking({ student: query }).id }), 'big primary')]
         : []),
       ...(!query && !students.length ? [h('p', { class: 'muted' }, '還沒有學生。有預約時會自動出現，也可以在上面輸入姓名新增。')] : []));
   }
@@ -35,7 +35,7 @@ export function studentsView() {
   search.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     if (!search.value.trim()) { toast('請先輸入姓名'); return; }
-    go('overview', { studentId: studentForBooking(search.value.trim(), false).id });
+    go('overview', { studentId: studentForBooking({ student: search.value.trim() }).id });
   });
   draw();
 

@@ -153,6 +153,24 @@ export function bookingIsUnclear(students, event) {
   return students.filter((s) => !s.deleted && (s.name === name || (s.aliases || []).includes(name))).length > 1;
 }
 
+/**
+ * Later bookings for someone not in the student list yet, one per person. Creating them before the first class
+ * lets a new student's first plan be written ahead (2026-11-17). Unclear or unreadable titles are left out.
+ */
+export function newStudentBookings(events, students, today) {
+  const seen = new Set();
+  const result = [];
+  for (const event of events) {
+    if (!event?.student || event.unreadable || event.date <= today) continue;
+    if (studentForEvent(students, event) || bookingIsUnclear(students, event)) continue;
+    const key = `${String(event.student).trim()}|${event.birthday || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(event);
+  }
+  return result;
+}
+
 export function findStudentByName(students, name) {
   const target = String(name || '').trim();
   return students.find((s) => !s.deleted && (s.name === target || (s.aliases || []).includes(target))) || null;
@@ -484,7 +502,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v24';
+export const APP_VERSION = 'v25';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];

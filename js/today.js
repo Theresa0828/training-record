@@ -1,6 +1,6 @@
 import { h, button, go, tab, tabBar, refreshView } from './dom.js';
 import * as store from './store.js';
-import { dateKey, chosenCalendars, studentForEvent, bookingIsUnclear, doneSessions, studentsNeedingPlan, newId, nextClassNumber, classLabel } from './core.js';
+import { dateKey, chosenCalendars, studentForEvent, bookingIsUnclear, newStudentBookings, doneSessions, studentsNeedingPlan, newId, nextClassNumber, classLabel } from './core.js';
 import { nextDateText } from './classinfo.js';
 import { currentStatus, isConnected, syncNow } from './sync.js';
 import { loadDemo } from './demo.js';
@@ -103,6 +103,8 @@ function welcome() {
 export function todayView() {
   const today = dateKey();
   const events = store.all('events').sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  // A new student booked for a later day gets a card now, so the first plan can be written before that day.
+  newStudentBookings(events, store.all('students'), today).forEach(studentForBooking);
   // A title shared by namesakes with no birthday is listed as unclear instead of creating yet another student.
   const unclear = events.filter((e) => bookingIsUnclear(store.all('students'), e));
   const readable = events.filter((e) => e.date === today && e.student && !unclear.includes(e));
