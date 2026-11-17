@@ -21,6 +21,8 @@ import { swipeToDelete } from './swipe.js';
 import { termRing } from './charts.js';
 import { equipmentControl } from './equipment.js';
 import { paramTile } from './param.js';
+import { captureForExercise } from './photos.js';
+import { rowMedia } from './core.js';
 
 const SET_NAMES = ['一', '二', '三', '四', '五'];
 const STATUS_FLAGS = [['pain', '疼痛'], ['sleep', '睡眠'], ['diet', '飲食'], ['mood', '心情']];
@@ -421,11 +423,13 @@ export function recordView({ studentId, kind, sessionId }) {
     const { name } = cells[r];
     name.classList.toggle('is-selected', selected?.row === r);
     name.parentElement?.parentElement?.classList.toggle('is-current', selected?.row === r && mode !== 'vitals');
+    const media = rowMedia(store.all('photos'), session.id, row.id).length;
     const meta = [
       equipmentText(row),
       row.rpe ? `RPE ${row.rpe}` : '',
       painList(row).length ? `痛 ${painShort(row)}` : '',
       row.tags.length ? `${row.tags.length} 標籤` : '',
+      media ? `影像 ${media}` : '',
     ].filter(Boolean).join('・');
     // Long names get smaller type and a third line rather than being cut off.
     name.replaceChildren(h('span', { class: `grid-name-text${row.name.length > 26 ? ' is-long' : ''}` }, row.name), meta ? h('span', { class: 'grid-name-meta' }, meta) : '');
@@ -593,6 +597,16 @@ export function recordView({ studentId, kind, sessionId }) {
     return [
       panelTop(row, set && `第${SET_NAMES[selected.set]}組・${planText}`, [
         handoutButton(row.exerciseId),
+        // Photo or video of this exercise and set, named and filed by itself (2026-11-17).
+        h('button', {
+          type: 'button',
+          class: 'btn swap-btn',
+          'aria-label': `拍攝 ${row.name}${set ? ` 第${SET_NAMES[selected.set]}組` : ''}`,
+          onclick: () => {
+            const r = selected.row;
+            captureForExercise(student, session, row, set ? selected.set : null, () => { if (session.rows[r] === row) paintName(r); });
+          },
+        }, icon('camera'), h('span', {}, '拍攝')),
         h('button', { type: 'button', class: 'btn swap-btn', onclick: () => openSwap(selected.row) }, icon('swap'), h('span', {}, '換動作')),
       ]),
       row.kind === 'strength' && equipmentControl(row, (equipment, band) => {

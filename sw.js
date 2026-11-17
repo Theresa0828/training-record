@@ -1,6 +1,6 @@
 // Serves the app from the device so it opens instantly and works offline.
 // Bump VERSION on every release so devices fetch the new files.
-const VERSION = 'v26';
+const VERSION = 'v27';
 const CACHE = `training-record-${VERSION}`;
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png',

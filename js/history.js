@@ -10,7 +10,8 @@ export function sessionTitle(session) {
   return `${session.date.replaceAll('-', '/')}・${kindLabel(session.kind)}${session.classNo ? `・${classLabel(session.classNo, session.packageSize)}` : ''}`;
 }
 
-export function sessionTable(session) {
+/** `extra(row)` adds something under an exercise, such as its photos and videos on the overview's record. */
+export function sessionTable(session, extra = null) {
   return h('div', { class: 'stack-sm' }, session.rows.map((row) => {
     const missed = row.sets.filter((s) => !s.done).length;
     const details = rowDetails(row).join('・');
@@ -19,7 +20,8 @@ export function sessionTable(session) {
         h('strong', {}, row.name),
         h('span', { class: 'history-sets' }, row.sets.map((set) => h('span', { class: set.done ? '' : 'set-missed' }, setText(row, set))))),
       missed > 0 && h('span', { class: 'chip chip-alert' }, `${missed} 組未完成`),
-      details && h('div', { class: 'muted small' }, details));
+      details && h('div', { class: 'muted small' }, details),
+      extra?.(row));
   }));
 }
 

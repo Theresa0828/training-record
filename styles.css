@@ -850,6 +850,9 @@ button.stat-card:active { transform: scale(.985); }
 @media (max-width: 640px) {
   .panel-top { grid-template-columns: minmax(0, 1fr) auto; }
   .panel-top .panel-tabs { grid-column: 1 / -1; grid-row: 2; }
+  /* Phones: the tool buttons keep their icon; the word stays for screen readers (v27, 拍攝 made a third button). */
+  .panel-tools .swap-btn { min-width: 48px; padding-inline: 10px; }
+  .panel-tools .swap-btn > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 @media (min-width: 641px) {
   .record .topbar { min-height: 56px; }
@@ -1087,6 +1090,25 @@ button.stat-card:active { transform: scale(.985); }
 .camera-shutter:active { transform: scale(.94); background: rgba(252, 251, 246, .55); }
 .camera-shutter:disabled { opacity: .3; }
 @media (prefers-reduced-motion: reduce) { .camera-shutter:active, .photo-tile:active { transform: none; } }
+/* Videos (v27): a play sign and the length on list stills; record mode turns the shutter red. */
+.media-wrap { position: relative; display: block; }
+.media-badge { position: absolute; left: 6px; bottom: 6px; display: inline-flex; align-items: center; gap: 2px; padding: 2px 8px 2px 4px; border-radius: 999px; background: rgba(2, 3, 0, .62); color: #FCFBF6; font-size: 13px; font-variant-numeric: tabular-nums; }
+.media-badge .icon { width: 16px; height: 16px; }
+.photo-section { margin: 8px 0 0; font-size: 16px; font-weight: 500; }
+.photo-detail { display: block; }
+.row-media { margin-top: 6px; }
+.media-viewer .photo-img { max-height: 70vh; object-fit: contain; background: #020300; }
+video.photo-img { object-fit: contain; background: #020300; }
+.camera-modes { display: flex; gap: 6px; padding: 4px; border-radius: 999px; background: rgba(252, 251, 246, .12); }
+.camera-mode { min-height: 44px; padding: 0 16px; border: 0; border-radius: 999px; background: transparent; color: #FCFBF6; font: inherit; font-size: 16px; cursor: pointer; touch-action: manipulation; }
+.camera-mode[aria-pressed="true"] { background: #FCFBF6; color: #020300; font-weight: 500; }
+.camera.is-video .camera-shutter { background: #A85A45; }
+.camera.is-recording .camera-shutter { border-radius: 22px; background: #A85A45; }
+.camera.is-recording .camera-modes { opacity: .3; pointer-events: none; }
+.camera .camera-text:disabled { opacity: .3; }
+.camera-timer { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); padding: 2px 12px; border-radius: 999px; background: #A85A45; color: #FCFBF6; font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; display: none; }
+.camera.is-recording .camera-timer { display: block; }
+
 
 /* Phone width: the overview's small buttons move to their own row and scroll sideways instead of squeezing the name (2026-11-17). */
 @media (max-width: 600px) {

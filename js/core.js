@@ -502,7 +502,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v26';
+export const APP_VERSION = 'v27';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -1200,7 +1200,79 @@ export function photosOf(photos, studentId, angle = null) {
     .sort((a, b) => (b.date + (b.takenAt || 0)).localeCompare(a.date + (a.takenAt || 0)) || (b.takenAt || 0) - (a.takenAt || 0));
 }
 
-/** Drive file name, readable in the folder: 2026-11-17_王小明_體態正面. The photo id is added by Drive. */
+const UNSAFE_FILE_CHARS = /[\\/:*?"<>|]/g;
+
+/**
+ * Drive file name, so the folder needs no sorting by hand (2026-11-17):
+ * 2026-11-17_王小明_第6堂_高腳杯深蹲_第2組 from class, 2026-11-17_王小明_體態正面 from the photo list.
+ * The id and the extension are added by Drive.
+ */
 export function photoFileName(photo, studentName) {
-  return [photo.date, String(studentName || '').trim() || '學生', photoAngleLabel(photo.angle)].join('_');
+  const parts = [photo.date, String(studentName || '').trim() || '學生'];
+  if (photo.exercise) {
+    if (photo.classNo) parts.push(`第${photo.classNo}堂`);
+    parts.push(photo.exercise);
+    if (photo.set) parts.push(`第${photo.set}組`);
+  } else {
+    parts.push(photoAngleLabel(photo.angle));
+  }
+  return parts.join('_').replace(UNSAFE_FILE_CHARS, '_');
+}
+
+/** One Drive folder per student; namesakes are told apart by the birthday, as in the calendar (王小明 0828). */
+export function mediaFolderName(student) {
+  const name = String(student?.name || '').trim() || '未分類';
+  return (student?.birthday ? `${name} ${student.birthday}` : name).replace(UNSAFE_FILE_CHARS, '_');
+}
+
+/** Media taken during one exercise of one class. */
+export function rowMedia(photos, sessionId, rowId) {
+  if (!sessionId || !rowId) return [];
+  return photos.filter((p) => !p.deleted && p.sessionId === sessionId && p.rowId === rowId)
+    .sort((a, b) => (a.takenAt || 0) - (b.takenAt || 0));
+}
+
+// Videos (2026-11-17, v27) share the photo list: same sync, same delete; `type: 'video'` marks them.
+export const VIDEO_MAX_SECONDS = 60;
+// Larger files would not fit one upload to Apps Script once encoded.
+export const VIDEO_MAX_BYTES = 30 * 1024 * 1024;
+
+export function isVideo(item) {
+  return item?.type === 'video';
+}
+
+/** What a photo or video shows: the exercise when taken in class, otherwise the angle. */
+export function mediaLabel(item) {
+  return item?.exercise || photoAngleLabel(item?.angle);
+}
+
+/** One student's media taken in class of one exercise, newest first. */
+export function exerciseMedia(photos, studentId, exercise) {
+  return photosOf(photos, studentId).filter((p) => p.exercise === exercise);
+}
+
+/** Exercises that have media from class, the most recently filmed first. */
+export function mediaExercises(photos, studentId) {
+  const groups = new Map();
+  for (const item of photosOf(photos, studentId)) {
+    if (!item.exercise) continue;
+    if (!groups.has(item.exercise)) groups.set(item.exercise, []);
+    groups.get(item.exercise).push(item);
+  }
+  return [...groups].map(([name, list]) => ({ name, list }));
+}
+
+/** File extension for Drive, from the recorded type. */
+export function mediaExtension(item) {
+  if (!isVideo(item)) return 'jpg';
+  const mime = String(item.mime || '');
+  if (mime.includes('webm')) return 'webm';
+  if (mime.includes('quicktime')) return 'mov';
+  return 'mp4';
+}
+
+/** 0:07, 1:00. Whole seconds counted down, like the video player shows them. */
+export function clockText(seconds) {
+  const s = Math.max(0, Math.floor((seconds || 0) + 0.001));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }

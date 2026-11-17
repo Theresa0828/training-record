@@ -1,6 +1,6 @@
 // Talks to the Apps Script on the teacher's Google account. Runs only in the background.
 import * as store from './store.js';
-import { mergeRecords, fileForRecord, collectionForFile, parseBookingTitle, isUnreadableBooking, dateKey, chosenCalendars, mergeCalendarEvents, parsePlainTitle, photoFileName } from './core.js';
+import { mergeRecords, fileForRecord, collectionForFile, parseBookingTitle, isUnreadableBooking, dateKey, chosenCalendars, mergeCalendarEvents, parsePlainTitle, photoFileName, mediaFolderName, mediaExtension, isVideo } from './core.js';
 
 const statusListeners = new Set();
 let status = { state: 'idle', message: '' };
@@ -8,6 +8,8 @@ let running = false;
 let again = false;
 let timer = null;
 const REQUEST_TIMEOUT_MS = 60000;
+// A minute of video is about 11 MB; on classroom Wi-Fi that can take a while each way.
+const VIDEO_TIMEOUT_MS = 240000;
 // While the app stays open, the calendar is read again this often, so a booking moved elsewhere shows up by itself.
 const CALENDAR_REFRESH_MS = 5 * 60 * 1000;
 const calendarListeners = new Set();
@@ -135,10 +137,17 @@ async function syncPhotos() {
     if (!blob) continue;
     const student = store.get('students', photo.studentId);
     try {
-      const data = await call('photo', { id: photo.id, name: photoFileName(photo, student?.name || ''), data: await blobToBase64(blob) });
+      // Named and filed by student, so the Drive folder needs no sorting by hand (2026-11-17).
+      const data = await call('media', {
+        id: photo.id,
+        name: photoFileName(photo, student?.name || ''),
+        folder: mediaFolderName(student),
+        ext: mediaExtension(photo),
+        data: await blobToBase64(blob),
+      }, isVideo(photo) ? VIDEO_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
       store.save('photos', { ...store.get('photos', photo.id), driveId: data.fileId });
     } catch (error) {
-      photoProblem = /unknown action/.test(error.message) ? '照片還沒上傳：雲端連線程式要更新（照設定步驟重新部署）' : `照片上傳失敗：${error.message}`;
+      photoProblem = /unknown action/.test(error.message) ? '照片影片還沒上傳：雲端連線程式要更新（照設定步驟重新部署）' : `照片影片上傳失敗：${error.message}`;
       return;
     }
   }
@@ -149,7 +158,7 @@ async function syncPhotos() {
       await call('photoTrash', { fileId: record.driveId, trashed: !!record.deleted });
       store.save('photos', { ...store.get('photos', record.id), driveTrashed: !!record.deleted });
     } catch (error) {
-      photoProblem = `照片刪除還沒同步：${error.message}`;
+      photoProblem = `照片影片刪除還沒同步：${error.message}`;
       return;
     }
   }
@@ -159,9 +168,9 @@ async function syncPhotos() {
 export async function photoBlob(photo) {
   const local = await store.readPhotoBlob(photo.id);
   if (local || !photo.driveId || !isConnected()) return local;
-  const data = await call('photoGet', { fileId: photo.driveId });
+  const data = await call('photoGet', { fileId: photo.driveId }, isVideo(photo) ? VIDEO_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
   const bytes = Uint8Array.from(atob(data.data), (c) => c.charCodeAt(0));
-  const blob = new Blob([bytes], { type: 'image/jpeg' });
+  const blob = new Blob([bytes], { type: isVideo(photo) ? (photo.mime || 'video/mp4').split(';')[0] : 'image/jpeg' });
   await store.savePhotoBlob(photo.id, blob);
   return blob;
 }

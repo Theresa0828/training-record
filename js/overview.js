@@ -11,7 +11,7 @@ import { openPainSheet, painScores } from './painsheet.js';
 import { exportPdf } from './print.js';
 import { icon } from './icons.js';
 import { trendChart, volumeChart } from './trend.js';
-import { photoSheet } from './photos.js';
+import { photoSheet, rowMediaStrip } from './photos.js';
 import { termRing, calendarPage, sparkline, painBars, learnedTile, qualityDots } from './charts.js';
 import { bodyMap } from './bodymap.js';
 import { sessionTable, sessionFacts, sessionTitle } from './history.js';
@@ -131,7 +131,7 @@ function historySheet(history) {
               closeList();
               go('record', { studentId: session.studentId, sessionId: session.id });
             }, '')),
-          sessionFacts(session), sessionTable(session)), { wide: true });
+          sessionFacts(session), sessionTable(session, (row) => rowMediaStrip(session, row))), { wide: true });
       }, 'list-item history-item');
       // Changes kept on this iPad but not yet saved come first; then saved ones still waiting for Drive.
       if ((store.getMeta('editDrafts', {}) || {})[session.id]) badge.textContent = '還沒存檔';
@@ -150,11 +150,12 @@ function pdfSheet(student, history) {
   const unsigned = history.filter((s) => !s.studentSignature).length;
   openSheet('匯出 MRE005 PDF', (close) => h('div', { class: 'stack' },
     unsigned > 0 && h('p', { class: 'muted' }, `有 ${unsigned} 堂還沒有學生簽名。`),
-    [3, 6, 12].filter((n) => n <= history.length || n === 3).map((n) => button(`最近 ${Math.min(n, history.length)} 堂`, () => {
+    // Shorter ranges only when they leave something out; "all" is always there (2026-11-17: 5 classes could not export all 5).
+    [3, 6, 12].filter((n) => n < history.length).map((n) => button(`最近 ${n} 堂`, () => {
       close();
       exportPdf(student, history.slice(0, n));
     }, 'list-item')),
-    history.length > 12 && button(`全部 ${history.length} 堂`, () => { close(); exportPdf(student, history); }, 'list-item')));
+    button(`全部 ${history.length} 堂`, () => { close(); exportPdf(student, history); }, 'list-item')));
 }
 
 /** A card holding one thing to read. It is a button because a tap gives the detail. */
@@ -460,7 +461,7 @@ export function overviewView({ studentId }) {
         history.length > 0 && button(`紀錄 ${history.length}`, () => historySheet(history), 'ghost', { 'aria-label': `過去紀錄，共 ${history.length} 堂` }),
         history.length > 0 && button('PDF', () => pdfSheet(student, history), 'ghost', { 'aria-label': '匯出 PDF' }),
         history.length > 0 && button('給學生看', () => go('report', { studentId: student.id }), 'ghost'),
-        button('照片', () => photoSheet(student), 'ghost', { 'aria-label': '照片與對位拍照' }),
+        button('照片影片', () => photoSheet(student), 'ghost', { 'aria-label': '照片與影片' }),
         button('編輯資料', () => editProfileSheet(student), 'ghost'))),
     h('main', { class: 'page bento' },
       textCard(student, 'span-3', '疼痛與禁忌', 'warn', student.contraindications, '還沒填寫，點一下填寫', 'is-alert'),
