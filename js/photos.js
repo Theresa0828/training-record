@@ -137,6 +137,53 @@ async function saveMedia(student, fields, blob, info = {}) {
   return item;
 }
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Asks the video to play without waiting forever: play() never settles when the camera sends nothing. */
+function startPlaying(video) {
+  return Promise.race([video.play().catch(() => {}), wait(1000)]);
+}
+
+/** Plays the camera and waits for its first frame (up to 4 seconds). */
+async function showsPicture(video) {
+  const deadline = Date.now() + 4000;
+  startPlaying(video);
+  while (Date.now() < deadline) {
+    if (video.videoWidth && video.readyState >= 2 && !video.paused) return true;
+    await wait(100);
+    if (video.paused) startPlaying(video);
+  }
+  return false;
+}
+
+/** True when an image, video frame or canvas is entirely black. */
+function looksBlack(source) {
+  const probe = h('canvas', { width: 24, height: 32 });
+  const ctx = probe.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(source, 0, 0, 24, 32);
+  const { data } = ctx.getImageData(0, 0, 24, 32);
+  for (let i = 0; i < data.length; i += 4) if (data[i] > 10 || data[i + 1] > 10 || data[i + 2] > 10) return false;
+  return true;
+}
+
+/** True when a picture is entirely black: the camera gave no image. A dark room still has some light. */
+async function isBlank(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = reject;
+      el.src = url;
+    });
+    return looksBlack(img);
+  } catch {
+    return false;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function recorderType() {
   if (typeof MediaRecorder === 'undefined') return null;
   const types = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
@@ -160,10 +207,12 @@ function openCamera({ title, ghost, onShot }) {
   let opacity = 0.45;
   let mode = 'photo';
   let recording = null;
+  let closed = false;
 
   const stop = () => stream?.getTracks().forEach((track) => track.stop());
   const close = () => {
     if (recording) { recording.finish(); return; }
+    closed = true;
     stop();
     overlay.remove();
     document.removeEventListener('visibilitychange', onHidden);
@@ -174,22 +223,38 @@ function openCamera({ title, ghost, onShot }) {
 
   async function start() {
     stop();
+    shutter.disabled = true;
     message.hidden = true;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false });
-      video.srcObject = stream;
-      shutter.disabled = false;
     } catch {
-      shutter.disabled = true;
       message.hidden = false;
       message.textContent = '打不開相機。請在 Chrome 允許使用相機，或改用「從相簿選」。';
+      return;
+    }
+    // Closed while the camera was starting: turn it off again at once.
+    if (closed) { stop(); return; }
+    video.srcObject = stream;
+    // iPad Chrome does not always start a camera picture by itself (2026-11-18: the viewfinder stayed black).
+    // The shutter waits for the first real frame, so a photo is never taken of nothing.
+    if (await showsPicture(video)) {
+      shutter.disabled = false;
+    } else {
+      message.hidden = false;
+      message.textContent = '相機畫面沒有出來。請按「取消」再開一次；還是不行，關掉分頁重新打開。';
     }
   }
 
   async function takePhoto() {
     shutter.disabled = true;
     try {
+      if (video.paused) await startPlaying(video);
       const blob = await frameToJpeg(video, video.videoWidth, video.videoHeight);
+      if (await isBlank(blob)) {
+        shutter.disabled = false;
+        toast('拍到的是全黑畫面，沒有存。請等畫面出來再拍一次');
+        return;
+      }
       close();
       onShot(blob, {});
     } catch {
@@ -203,6 +268,9 @@ function openCamera({ title, ghost, onShot }) {
     const canvas = h('canvas', { width: VIDEO_WIDTH, height: VIDEO_HEIGHT });
     const ctx = canvas.getContext('2d');
     let frame = 0;
+    let drawn = 0;
+    // Recording the camera directly cannot be checked; the 3:4 canvas can (2026-11-18: no black clips).
+    let sawPicture = !canvas.captureStream;
     const draw = () => {
       const vw = video.videoWidth;
       const vh = video.videoHeight;
@@ -212,6 +280,8 @@ function openCamera({ title, ghost, onShot }) {
         if (sw / sh > FRAME) sw = sh * FRAME;
         else sh = sw / FRAME;
         ctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, VIDEO_WIDTH, VIDEO_HEIGHT);
+        drawn += 1;
+        if (!sawPicture && drawn % 15 === 0 && !looksBlack(canvas)) sawPicture = true;
       }
       frame = requestAnimationFrame(draw);
     };
@@ -240,6 +310,7 @@ function openCamera({ title, ghost, onShot }) {
       const blob = new Blob(chunks, { type: mime.split(';')[0] });
       close();
       if (!blob.size) { toast('影片沒有錄到，請再錄一次'); return; }
+      if (!sawPicture) { toast('錄到的是全黑畫面，沒有存。請等畫面出來再錄一次'); return; }
       onShot(blob, { type: 'video', mime: blob.type, duration });
     };
     recording = { finish: () => { if (recorder.state !== 'inactive') recorder.stop(); } };

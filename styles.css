@@ -1080,6 +1080,8 @@ button.stat-card:active { transform: scale(.985); }
 .camera-guide { position: absolute; pointer-events: none; background: rgba(252, 251, 246, .35); }
 .camera-guide.is-v { left: 50%; top: 0; bottom: 0; width: 1px; }
 .camera-guide.is-h { top: 50%; left: 0; right: 0; height: 1px; }
+/* hidden must win over the display below: without this the black message box covered the camera (v26–v27). */
+.camera-message[hidden] { display: none; }
 .camera-message { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 32px; text-align: center; background: #020300; font-size: 16px; }
 .camera-controls { display: grid; justify-items: center; gap: 14px; padding: 14px 20px 22px; }
 .camera-blend { display: grid; grid-template-columns: auto 1fr 48px; align-items: center; gap: 12px; width: min(100%, 520px); font-size: 16px; }
