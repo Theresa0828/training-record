@@ -1,6 +1,6 @@
 // How a past class is shown: on the overview's list and beside the plan for reference.
 import { h } from './dom.js';
-import { classLabel, isBpFlagged, painText, rowDetails, setText } from './core.js';
+import { classLabel, isBpFlagged, painNoteText, painText, rowDetails, setText } from './core.js';
 import { kindLabel } from './today.js';
 import { icon } from './icons.js';
 
@@ -36,6 +36,7 @@ export function sessionFacts(session) {
   return [
     vitals && h('p', { class: 'muted' }, vitals),
     flags.length > 0 && h('p', {}, `當天狀況：${flags.join('、')}`),
+    session.dayPain && painNoteText(session.dayPain) && h('p', {}, `上課前疼痛附註：${painNoteText(session.dayPain)}`),
     session.special && h('p', {}, `特殊狀況：${session.special}`),
     session.note && h('p', {}, `備註：${session.note}`),
   ].filter(Boolean);

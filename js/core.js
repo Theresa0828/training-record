@@ -502,7 +502,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v28';
+export const APP_VERSION = 'v29';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -708,6 +708,22 @@ export function setPainMap(row, map) {
   row.painScore = scores.length ? Math.max(...scores) : null;
 }
 
+/**
+ * Each marked part's own note (2026-11-23: one shared note could not say which part it was about).
+ * Only parts still marked count, in the order they were marked: ['左膝：下蹲到底才痛'].
+ */
+export function painPartNotes(target) {
+  const notes = target?.painPartNotes || {};
+  return painList(target || {})
+    .filter((p) => p.part && String(notes[p.part] || '').trim())
+    .map((p) => `${p.part}：${String(notes[p.part]).trim()}`);
+}
+
+/** Every pain note of one exercise, check-in or profile: each part's first, then the note for no part in particular. */
+export function painNoteText(target) {
+  return [...painPartNotes(target), String(target?.painNote || '').trim()].filter(Boolean).join('；');
+}
+
 /** 左膝 4、下背 2 */
 export function painText(row) {
   return painList(row).map(({ part, score }) => [part, score ?? ''].filter((bit) => bit !== '').join(' ')).join('、');
@@ -733,7 +749,7 @@ export function rowDetails(row) {
     row.rpe ? `RPE ${row.rpe}` : '',
     row.replacedFrom ? `由 ${row.replacedFrom.name} 換來` : '',
     pain ? `痛 ${pain}` : '',
-    row.painNote ? `疼痛附註：${row.painNote}` : '',
+    painNoteText(row) ? `疼痛附註：${painNoteText(row)}` : '',
     row.quality ? `品質 ${row.quality}` : '',
     row.assist ? `協助 ${row.assist}` : '',
     ...(row.props || []),
@@ -753,7 +769,7 @@ export function recentPain(history, limit = 5) {
   for (const session of history.slice(0, limit)) {
     for (const row of painSources(session)) {
       if (painList(row).length) {
-        items.push({ date: session.date, exercise: row.name || DAY_PAIN, text: painText(row), note: row.painNote || '' });
+        items.push({ date: session.date, exercise: row.name || DAY_PAIN, text: painText(row), note: painNoteText(row) });
       }
     }
   }
@@ -970,7 +986,7 @@ function maxDoneWeight(row) {
 
 /** What the teacher wrote about an exercise in one class: its 備註 tags and the pain note. */
 function rowNotes(row) {
-  return [...(row.tags || []), row.painNote].map((text) => String(text || '').trim()).filter(Boolean);
+  return [...(row.tags || []), painNoteText(row)].map((text) => String(text || '').trim()).filter(Boolean);
 }
 
 /** Strength exercises done at the same weight as the class before, but felt easier by at least one RPE point. */

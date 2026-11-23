@@ -4,7 +4,7 @@ import * as store from './store.js';
 import { isConnected, isWaiting } from './sync.js';
 import { classNumberSheet, nextDateSheet } from './classinfo.js';
 import {
-  dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, studentForEvent, cleanBirthday, recentPain, learnedSummary, pilatesLevel,
+  dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, studentForEvent, cleanBirthday, recentPain, painNoteText, learnedSummary, pilatesLevel,
   weightTrends, volumeSeries, ONE_RM_MAX_REPS, painSeries, overallStatus, bodyCompSummary, painList, painText, setPainMap,
 } from './core.js';
 import { openPainSheet, painScores } from './painsheet.js';
@@ -40,14 +40,16 @@ function editProfileSheet(student) {
     };
     painButton.addEventListener('click', () => openPainSheet('學生資料：疼痛部位', {
       scores: painScores(current().pain),
+      partNotes: current().pain?.painPartNotes,
       note: current().pain?.painNote,
-      notePlaceholder: '例如：久坐後下背痛、上樓梯右膝痛',
+      notePlaceholder: '例如：久坐後才痛、上樓梯痛',
       onScores: (map) => {
         const pain = { ...(current().pain || {}) };
         setPainMap(pain, map);
         store.save('students', { ...current(), pain });
         paintPain();
       },
+      onPartNotes: (notes) => store.save('students', { ...current(), pain: { ...(current().pain || {}), painPartNotes: notes } }),
       onNote: (value) => store.save('students', { ...current(), pain: { ...(current().pain || {}), painNote: value } }),
       onDone: paintPain,
     }));
@@ -342,7 +344,7 @@ function painSheet(history, student) {
     h('div', { class: 'stack-sm' }, h('div', { class: 'stepper-label' }, '學生資料記的疼痛'),
       profile.length
         ? h('div', { class: 'pain-sheet-map' }, scoreFigure(painScores(student.pain), true),
-          h('div', {}, h('p', {}, painText(student.pain)), student.pain.painNote && h('p', { class: 'muted small' }, student.pain.painNote)))
+          h('div', {}, h('p', {}, painText(student.pain)), painNoteText(student.pain) && h('p', { class: 'muted small' }, painNoteText(student.pain))))
         : h('p', { class: 'muted' }, '還沒標。'),
       button(profile.length ? '修改學生資料的疼痛' : '在人體圖標出來', () => editProfileSheet(student), ''))), { wide: true });
 }

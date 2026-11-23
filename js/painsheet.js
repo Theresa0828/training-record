@@ -1,6 +1,7 @@
 // Marking pain on the front and back body: each part gets its own 0–10 score, written on the figure.
 // Used for one exercise in class, for how the student felt on arrival, and in the student's profile.
 import { h, button, holdButton, openSheet, toast } from './dom.js';
+import { icon } from './icons.js';
 import { painList } from './core.js';
 import { bodyMap } from './bodymap.js';
 
@@ -10,11 +11,17 @@ export function painScores(target) {
 }
 
 /**
- * Opens the body map. Every tap is saved at once through onScores; the note through onNote.
- * Taking a part off needs the held button, and leaves an undo.
+ * Opens the body map. Every tap is saved at once through onScores; each part's note through onPartNotes
+ * (2026-11-23), the note for no part in particular through onNote.
+ * Taking a part off needs the held button, takes its note with it, and leaves an undo.
  */
-export function openPainSheet(title, { scores: initial = {}, note = '', notePlaceholder = '例如：下蹲到底才痛、刺痛', onScores, onNote, onDone }) {
+export function openPainSheet(title, {
+  scores: initial = {}, partNotes: initialNotes = {}, note = '', notePlaceholder = '例如：下蹲到底才痛、刺痛',
+  onScores, onPartNotes, onNote, onDone,
+}) {
   const scores = { ...initial };
+  const notes = Object.fromEntries(Object.entries(initialNotes || {}).filter(([part, text]) => part in scores && String(text || '').trim()));
+  const saveNotes = () => onPartNotes?.({ ...notes });
   let active = Object.keys(scores).at(-1) || null;
   const save = () => onScores({ ...scores });
   openSheet(title, (close) => {
@@ -22,11 +29,21 @@ export function openPainSheet(title, { scores: initial = {}, note = '', notePlac
     const keypad = h('div', {});
     const remove = (part) => {
       const score = scores[part];
+      const text = notes[part];
       delete scores[part];
+      delete notes[part];
       active = Object.keys(scores).at(-1) || null;
       save();
+      if (text) saveNotes();
       draw();
-      toast(`已移除 ${part}`, { label: '復原', run: () => { scores[part] = score; active = part; save(); draw(); } });
+      toast(`已移除 ${part}`, { label: '復原', run: () => {
+        scores[part] = score;
+        if (text) notes[part] = text;
+        active = part;
+        save();
+        if (text) saveNotes();
+        draw();
+      } });
     };
     // The first tap marks a part and a tap on another marked part moves to it. Taking one off needs the held button.
     const tapPart = (part) => {
@@ -39,13 +56,34 @@ export function openPainSheet(title, { scores: initial = {}, note = '', notePlac
       draw();
     };
     const map = bodyMap(tapPart);
-    const noteInput = h('textarea', { class: 'input pain-note', placeholder: notePlaceholder, 'aria-label': '疼痛附註', oninput: () => onNote(noteInput.value) });
+    const noteInput = h('textarea', { class: 'input pain-note', placeholder: '不屬於單一部位的，例如：整天都很緊', 'aria-label': '其他疼痛附註', oninput: () => onNote(noteInput.value) });
     noteInput.value = note || '';
+    const drawChips = () => {
+      picked.replaceChildren(...(Object.keys(scores).length
+        ? Object.entries(scores).map(([part, score]) => {
+          const label = score === null ? part : `${part} ${score}`;
+          return button(notes[part] ? [label, icon('pencil')] : label, () => { active = part; draw(); }, 'chip-btn', {
+            'aria-pressed': part === active ? 'true' : 'false',
+            'aria-label': notes[part] ? `${label}，有附註` : label,
+          });
+        })
+        : [h('p', { class: 'muted' }, '點圖上會痛的地方，再選分數')]));
+    };
     const draw = () => {
       map.update(scores, active);
-      picked.replaceChildren(...(Object.keys(scores).length
-        ? Object.entries(scores).map(([part, score]) => button(score === null ? part : `${part} ${score}`, () => { active = part; draw(); }, 'chip-btn', { 'aria-pressed': part === active ? 'true' : 'false' }))
-        : [h('p', { class: 'muted' }, '點圖上會痛的地方，再選分數')]));
+      drawChips();
+      const partNote = active && h('textarea', {
+        class: 'input pain-note', placeholder: notePlaceholder, 'aria-label': `${active} 的附註`,
+        oninput: () => {
+          const had = !!notes[active];
+          if (partNote.value.trim()) notes[active] = partNote.value;
+          else delete notes[active];
+          saveNotes();
+          // The chip's note mark appears or goes as soon as the first letter is typed or the last one erased.
+          if (had !== !!notes[active]) drawChips();
+        },
+      });
+      if (partNote) partNote.value = notes[active] || '';
       keypad.replaceChildren(active ? h('div', { class: 'field' },
         h('div', { class: 'row-between' },
           h('div', { class: 'pain-target' }, `${active} 的疼痛分數`),
@@ -54,11 +92,13 @@ export function openPainSheet(title, { scores: initial = {}, note = '', notePlac
           scores[active] = value;
           save();
           draw();
-        }, 'chip-btn', { 'aria-pressed': scores[active] === value ? 'true' : 'false' })))) : '');
+        }, 'chip-btn', { 'aria-pressed': scores[active] === value ? 'true' : 'false' }))),
+        h('div', { class: 'stepper-label' }, `${active} 的附註`),
+        partNote) : '');
     };
     draw();
     return h('div', { class: 'stack' }, map.el, picked, keypad,
-      h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '疼痛附註'), noteInput),
+      h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '其他附註（不分部位）'), noteInput),
       button('完成', () => { close(); onDone?.(); }, 'big primary'));
   });
 }

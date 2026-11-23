@@ -845,8 +845,10 @@ export function recordView({ studentId, kind, sessionId }) {
   function openPainSheet(row) {
     openPainMap(`疼痛：${row.name}`, {
       scores: painScores(row),
+      partNotes: row.painPartNotes,
       note: row.painNote,
       onScores: (map) => mutate(() => setPainMap(row, map)),
+      onPartNotes: (notes) => { row.painPartNotes = notes; persist(); },
       onNote: (value) => { row.painNote = value; persist(); },
       onDone: refresh,
     });
@@ -856,8 +858,9 @@ export function recordView({ studentId, kind, sessionId }) {
   function openDayPain(after) {
     openPainMap('今天上課前的疼痛', {
       scores: painScores(session.dayPain),
+      partNotes: session.dayPain?.painPartNotes,
       note: session.dayPain?.painNote,
-      notePlaceholder: '例如：早上起床下背緊、走路膝蓋痛',
+      notePlaceholder: '例如：早上起床比較緊、走路才痛',
       onScores: (map) => {
         mutate(() => {
           session.dayPain = { ...(session.dayPain || {}) };
@@ -867,6 +870,7 @@ export function recordView({ studentId, kind, sessionId }) {
         paintVitals();
         after();
       },
+      onPartNotes: (notes) => { session.dayPain = { ...(session.dayPain || {}), painPartNotes: notes }; persist(); },
       onNote: (value) => { session.dayPain = { ...(session.dayPain || {}), painNote: value }; persist(); },
       onDone: after,
     });
@@ -955,7 +959,7 @@ export function recordView({ studentId, kind, sessionId }) {
       return h('div', { class: 'stack-lg' },
         h('div', { class: 'stack' }, h('div', { class: 'stepper-label' }, '下次上課'), nextDateControl(studentId, paintClassInfo)),
         h('div', { class: 'stack' }, h('div', { class: 'stepper-label' }, '下次要注意的事'), notes),
-        h('div', { class: 'stack' },
+        h('div', { class: 'stack no-select' },
           h('div', { class: 'stepper-label' }, `教練簽名：${coachSignature ? '已帶入' : '已帶入姓名（可到設定存手寫簽名）'}`),
           h('div', { class: 'row-between' }, h('div', { class: 'stepper-label' }, '請學生在下面簽名'), button('重簽', () => canvas.clear(), 'ghost')),
           canvas.el),
@@ -1018,41 +1022,76 @@ export function recordView({ studentId, kind, sessionId }) {
   return screen;
 }
 
-/** A drawing area for signatures. Stored small so each class stays a few kilobytes. */
+/**
+ * A drawing area for signatures. Stored small so each class stays a few kilobytes.
+ * 2026-11-23 (Apple Pencil kept missing strokes or selecting text): every touch on the pad is claimed so iOS
+ * never turns it into text selection, scrolling or handwriting-to-text; once the Pencil has been used, finger and
+ * palm touches are ignored; each move draws only its new piece (with the Pencil's in-between points), and a tap leaves a dot.
+ */
 export function signaturePad(initial) {
-  const WIDTH = 480;
-  const HEIGHT = 140;
+  const WIDTH = 600;
+  const HEIGHT = 200;
   const el = h('canvas', { class: 'signature', width: WIDTH, height: HEIGHT, 'aria-label': '簽名區' });
   const ctx = el.getContext('2d');
-  ctx.lineWidth = 2.5;
   ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
   ctx.strokeStyle = '#020300';
-  let drawing = false;
+  ctx.fillStyle = '#020300';
   let empty = !initial;
+  let stroke = null; // { id, last: [x, y] }
+  let penUsed = false;
   if (initial) {
     const image = new Image();
-    image.onload = () => ctx.drawImage(image, 0, 0);
+    // Signatures saved before 2026-11-23 are a wider 480×140: keep their shape.
+    image.onload = () => {
+      const scale = Math.min(WIDTH / image.width, HEIGHT / image.height);
+      ctx.drawImage(image, 0, (HEIGHT - image.height * scale) / 2, image.width * scale, image.height * scale);
+    };
     image.src = initial;
   }
   const point = (e) => {
     const rect = el.getBoundingClientRect();
     return [(e.clientX - rect.left) * (WIDTH / rect.width), (e.clientY - rect.top) * (HEIGHT / rect.height)];
   };
+  // A light Pencil touch reports little pressure; never let that make the line vanish.
+  const widthOf = (e) => (e.pointerType === 'pen' && e.pressure > 0 ? 2.2 + e.pressure * 2.2 : 3.2);
+  const claim = (e) => { if (e.cancelable) e.preventDefault(); };
+  for (const type of ['touchstart', 'touchmove', 'touchend']) el.addEventListener(type, claim, { passive: false });
+  el.addEventListener('selectstart', claim);
+  el.addEventListener('contextmenu', claim);
+
   el.addEventListener('pointerdown', (e) => {
-    drawing = true;
+    claim(e);
+    if (e.pointerType === 'pen') penUsed = true;
+    // The hand resting on the screen while signing with the Pencil.
+    else if (penUsed && e.pointerType === 'touch') return;
+    if (stroke && !(e.pointerType === 'pen' && stroke.type !== 'pen')) return;
+    try { el.setPointerCapture(e.pointerId); } catch { /* the pointer may already be gone */ }
+    const at = point(e);
+    stroke = { id: e.pointerId, type: e.pointerType, last: at };
     empty = false;
-    el.setPointerCapture(e.pointerId);
     ctx.beginPath();
-    ctx.moveTo(...point(e));
+    ctx.arc(at[0], at[1], widthOf(e) / 2, 0, Math.PI * 2);
+    ctx.fill();
   });
   el.addEventListener('pointermove', (e) => {
-    if (!drawing) return;
-    ctx.lineTo(...point(e));
-    ctx.stroke();
+    if (!stroke || e.pointerId !== stroke.id) return;
+    claim(e);
+    const events = e.getCoalescedEvents?.().length ? e.getCoalescedEvents() : [e];
+    for (const piece of events) {
+      const at = point(piece);
+      ctx.lineWidth = widthOf(piece);
+      ctx.beginPath();
+      ctx.moveTo(...stroke.last);
+      ctx.lineTo(...at);
+      ctx.stroke();
+      stroke.last = at;
+    }
   });
-  const stop = () => { drawing = false; };
+  const stop = (e) => { if (stroke && e.pointerId === stroke.id) stroke = null; };
   el.addEventListener('pointerup', stop);
   el.addEventListener('pointercancel', stop);
+  el.addEventListener('lostpointercapture', stop);
   return {
     el,
     clear: () => { ctx.clearRect(0, 0, WIDTH, HEIGHT); empty = true; },

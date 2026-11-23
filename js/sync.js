@@ -114,9 +114,16 @@ async function syncRecords() {
 // Photos (2026-11-17). Their small records travel with the other data; the images go one by one.
 // An Apps Script deployed before photos existed answers 'unknown action': photos then wait on the iPad.
 let photoProblem = '';
+// Photos kept on this iPad only because the Apps Script predates them (2026-11-23: the records themselves did sync,
+// so this is a notice, not a red error that makes the teacher think her records are at risk).
+let photosAwaitingScript = 0;
 
 export function photoUploadProblem() {
   return photoProblem;
+}
+
+export function photosWaitingForScript() {
+  return photosAwaitingScript;
 }
 
 function blobToBase64(blob) {
@@ -130,6 +137,7 @@ function blobToBase64(blob) {
 
 async function syncPhotos() {
   photoProblem = '';
+  photosAwaitingScript = 0;
   const isDemo = (photo) => store.get('students', photo.studentId)?.demo;
   for (const photo of store.all('photos')) {
     if (photo.driveId || isDemo(photo)) continue;
@@ -147,7 +155,11 @@ async function syncPhotos() {
       }, isVideo(photo) ? VIDEO_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
       store.save('photos', { ...store.get('photos', photo.id), driveId: data.fileId });
     } catch (error) {
-      photoProblem = /unknown action/.test(error.message) ? '照片影片還沒上傳：雲端連線程式要更新（照設定步驟重新部署）' : `照片影片上傳失敗：${error.message}`;
+      if (/unknown action/.test(error.message)) {
+        photosAwaitingScript = store.all('photos').filter((p) => !p.driveId && !isDemo(p)).length;
+      } else {
+        photoProblem = `照片影片上傳失敗：${error.message}。照片影片仍在這台 iPad`;
+      }
       return;
     }
   }
@@ -229,7 +241,10 @@ export async function syncNow() {
     await syncCalendar();
     store.setMeta('lastSyncAt', Date.now());
     const now = new Date();
-    setStatus(photoProblem ? 'error' : 'ok', photoProblem || `已同步 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+    const synced = `已同步 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    if (photoProblem) setStatus('error', `${synced}，紀錄都已上傳。${photoProblem}`);
+    else if (photosAwaitingScript) setStatus('partial', `${synced}，紀錄都已上傳。照片影片 ${photosAwaitingScript} 個先存在這台 iPad，雲端連線程式更新後會自動補傳`);
+    else setStatus('ok', synced);
   } catch (error) {
     setStatus('error', `同步失敗：${error.message}。紀錄仍在這台裝置。`);
   } finally {

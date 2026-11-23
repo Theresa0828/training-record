@@ -58,7 +58,7 @@ async function boot() {
 
   let lastState = null;
   onStatus((status) => {
-    const finished = lastState === 'syncing' && status.state === 'ok';
+    const finished = lastState === 'syncing' && (status.state === 'ok' || status.state === 'partial');
     lastState = status.state;
     for (const el of document.querySelectorAll('[data-sync-status]')) {
       el.textContent = status.message;

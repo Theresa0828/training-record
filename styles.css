@@ -72,7 +72,7 @@ body {
   background: var(--bg); color: var(--fg); font: 400 16px/1.55 var(--font); font-synthesis: none;
   -webkit-text-size-adjust: 100%; overscroll-behavior: none; overflow-wrap: anywhere;
 }
-button, .chip { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+button, .chip, .no-select { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 h1, h2, p { margin: 0; font-weight: 400; }
 h1 { font-size: 28px; line-height: 1.25; min-width: 0; }
 h1 small { font-size: 16px; color: var(--muted); margin-left: 8px; }
@@ -116,6 +116,10 @@ h3 { margin: 0; font-size: 16px; font-weight: 500; color: var(--muted); }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 .status { font-size: 13px; color: var(--muted); }
 .status.warn { color: var(--on-alert-soft); }
+.script-help { background: var(--soft); border-radius: 16px; padding: 4px 14px; }
+.script-help summary { min-height: 48px; display: flex; align-items: center; font-weight: 500; color: var(--primary); cursor: pointer; touch-action: manipulation; }
+.script-help[open] { padding-bottom: 14px; }
+.script-help ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 
 /* Buttons */
 .btn {
@@ -412,13 +416,15 @@ textarea.input { min-height: 96px; resize: vertical; }
 .body-eye { fill: var(--bg); pointer-events: none; }
 .body-score { font: 700 14px var(--font); fill: var(--on-alert); pointer-events: none; font-variant-numeric: tabular-nums; }
 .body-picked { display: flex; flex-wrap: wrap; gap: 6px; min-height: 48px; align-items: center; }
+.body-picked .chip-btn { display: inline-flex; align-items: center; gap: 6px; }
+.body-picked .chip-btn .icon { width: 18px; height: 18px; }
 .pain-target { font-size: 16px; }
 .pain-note { min-height: 72px !important; }
 .chips-11 { display: grid; grid-template-columns: repeat(11, 1fr); }
 .chips-11 .chip-btn { min-width: 0; padding-inline: 0; }
 .chip-add { background: transparent; color: var(--primary-text); box-shadow: inset 0 0 0 1.5px var(--line-strong); }
 .option-row { min-height: 52px; }
-.signature { display: block; width: 100%; height: auto; aspect-ratio: 48 / 14; background: #fff; box-shadow: inset 0 0 0 1.5px var(--line-strong); border-radius: 14px; touch-action: none; }
+.signature { display: block; width: 100%; height: auto; aspect-ratio: 3 / 1; background: #fff; box-shadow: inset 0 0 0 1.5px var(--line-strong); border-radius: 14px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
 
 /* Overview and plan */
 .action-bar {
