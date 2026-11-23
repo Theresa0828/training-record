@@ -502,7 +502,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v29';
+export const APP_VERSION = 'v30';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -1291,4 +1291,55 @@ export function mediaExtension(item) {
 export function clockText(seconds) {
   const s = Math.max(0, Math.floor((seconds || 0) + 0.001));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// Movement problems found at an assessment, the A of SOAP (2026-11-23). They live on the student record,
+// one entry per assessment, and each problem keeps its id from one assessment to the next so it can be followed.
+export const PROBLEM_STATUS = [['open', '還在'], ['better', '改善'], ['solved', '解決']];
+// A first list for one-tap picking; the teacher confirms it and adds her own (2026-11-23, to be confirmed).
+export const DEFAULT_PROBLEMS = [
+  '深蹲膝內夾', '深蹲骨盆後捲', '骨盆前傾', '骨盆後傾', '肋骨外翻', '頭前傾', '圓肩', '肩胛穩定不足',
+  '胸椎活動度不足', '髖屈曲活動度不足', '踝背屈不足', '單腳站骨盆下沉', '核心控制不足', '呼吸代償', '左右不對稱',
+];
+
+/** Newest first; two on one day keep the order they were made in. */
+export function assessmentsByDate(student) {
+  return [...(student?.assessments || [])].filter((a) => !a.deleted)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+export function latestAssessment(student) {
+  return assessmentsByDate(student)[0] || null;
+}
+
+/** A new assessment starts from the last one: every problem not yet solved comes along with its status, to be checked again. */
+export function startAssessment(student, date, id) {
+  const last = latestAssessment(student);
+  const problems = (last?.problems || []).filter((p) => p.status !== 'solved')
+    .map((p) => ({ id: p.id, text: p.text, parts: [...(p.parts || [])], status: p.status || 'open', carried: true }));
+  return { id, date, problems, summary: '', createdAt: Date.now() };
+}
+
+export function problemCounts(assessment) {
+  const counts = { open: 0, better: 0, solved: 0 };
+  for (const p of assessment?.problems || []) counts[p.status in counts ? p.status : 'open'] += 1;
+  return counts;
+}
+
+/** 還在 2・改善 1・解決 1, leaving out the zeros. */
+export function problemCountText(assessment) {
+  const counts = problemCounts(assessment);
+  return PROBLEM_STATUS.filter(([key]) => counts[key]).map(([key, label]) => `${label} ${counts[key]}`).join('・');
+}
+
+/** One line per problem for reading back: 骨盆前傾（下背）. */
+export function problemText(problem) {
+  const parts = (problem.parts || []).join('、');
+  return parts ? `${problem.text}（${parts}）` : problem.text;
+}
+
+/** Puts an assessment in the student's list, replacing the one with the same id. */
+export function withAssessment(student, assessment) {
+  const others = (student.assessments || []).filter((a) => a.id !== assessment.id);
+  return { ...student, assessments: [...others, assessment] };
 }

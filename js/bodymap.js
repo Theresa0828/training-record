@@ -118,19 +118,26 @@ export function bodyMap(onTap, { readOnly = false } = {}) {
   el.append(...figures);
   const parts = [...el.querySelectorAll('.body-part')];
   const labels = [...el.querySelectorAll('.body-score')];
-  const update = (scores, active) => {
+  // `under` is pain shown beneath something else, such as movement problems (2026-11-23): those parts get a light
+  // pain colour and their pain score, while the parts being chosen keep the strong colour.
+  const update = (scores, active, under = {}) => {
     for (const path of parts) {
       const name = path.getAttribute('data-part');
       const on = name in scores;
+      const pain = under[name];
       path.classList.toggle('is-on', on);
+      path.classList.toggle('is-pain', pain !== undefined && pain !== null);
       path.classList.toggle('is-active', name === active);
       if (readOnly) continue;
       path.setAttribute('aria-pressed', on ? 'true' : 'false');
-      path.setAttribute('aria-label', on && scores[name] !== null ? `${name} ${scores[name]} 分` : name);
+      const painLabel = pain !== undefined && pain !== null ? `，疼痛 ${pain} 分` : '';
+      path.setAttribute('aria-label', on && scores[name] !== null ? `${name} ${scores[name]} 分` : `${name}${painLabel}`);
     }
     for (const label of labels) {
-      const score = scores[label.getAttribute('data-score')];
+      const name = label.getAttribute('data-score');
+      const score = scores[name] ?? under[name];
       label.textContent = score === null || score === undefined ? '' : String(score);
+      label.classList.toggle('is-under', scores[name] === undefined || scores[name] === null);
     }
   };
   return { el, update };

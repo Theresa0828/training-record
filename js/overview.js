@@ -6,6 +6,7 @@ import { classNumberSheet, nextDateSheet } from './classinfo.js';
 import {
   dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, studentForEvent, cleanBirthday, recentPain, painNoteText, learnedSummary, pilatesLevel,
   weightTrends, volumeSeries, ONE_RM_MAX_REPS, painSeries, overallStatus, bodyCompSummary, painList, painText, setPainMap,
+  latestAssessment, problemCountText, problemText,
 } from './core.js';
 import { openPainSheet, painScores } from './painsheet.js';
 import { exportPdf } from './print.js';
@@ -14,23 +15,63 @@ import { trendChart, volumeChart } from './trend.js';
 import { photoSheet, rowMediaStrip } from './photos.js';
 import { termRing, calendarPage, sparkline, painBars, learnedTile, qualityDots } from './charts.js';
 import { bodyMap } from './bodymap.js';
+import { assessmentSheet, editAssessment, latestSummary } from './assess.js';
 import { sessionTable, sessionFacts, sessionTitle } from './history.js';
 
 function shortDate(key) {
   return key.slice(5).replace('-', '/');
 }
 
+// Every field saves as it is typed (2026-11-23: the save button sat at the bottom and was easy to miss).
+// A blank name or an unreadable birthday is not stored; the old one stays and the line under the field says why.
 function editProfileSheet(student) {
+  let changed = false;
   openSheet('學生資料', (close) => {
+    const current = () => store.get('students', student.id) || student;
+    const status = h('p', { class: 'muted small', role: 'status' }, '改了會自動儲存，不用按儲存。');
+    const saveFields = (fields) => {
+      store.save('students', { ...current(), ...fields, isNew: false });
+      changed = true;
+      status.textContent = '已自動儲存';
+    };
+    const hint = () => h('p', { class: 'muted small field-hint', role: 'status' });
     const name = h('input', { class: 'input', value: student.name, 'aria-label': '姓名' });
+    const nameHint = hint();
+    name.addEventListener('input', () => {
+      const value = name.value.trim();
+      nameHint.textContent = value ? '' : '姓名不可空白，先保留原本的姓名';
+      if (value) saveFields({ name: value });
+    });
     const aliases = h('input', { class: 'input', value: (student.aliases || []).join('、'), 'aria-label': '日曆上的其他寫法' });
+    aliases.addEventListener('input', () => saveFields({ aliases: aliases.value.split(/[、,，]/).map((a) => a.trim()).filter(Boolean) }));
     // Only needed when two students share a name: the calendar title then reads 王小明 0828 (2026-11-12).
     const birthday = h('input', { class: 'input', value: student.birthday || '', inputmode: 'numeric', maxlength: 4, placeholder: '例：0828', 'aria-label': '生日，月日 4 碼' });
+    const birthdayHint = hint();
+    birthday.addEventListener('input', () => {
+      const typed = birthday.value.trim();
+      const day = cleanBirthday(typed);
+      if (!typed || day) {
+        birthdayHint.textContent = '';
+        saveFields({ birthday: day });
+      } else birthdayHint.textContent = typed.length < 4 ? '' : '生日請寫月日 4 碼，例如 0828';
+    });
     const goal = h('textarea', { class: 'input', 'aria-label': '訓練目標' });
     goal.value = student.goal || '';
+    goal.addEventListener('input', () => saveFields({ goal: goal.value }));
+    // The goal is written with the latest problem summary in view, so the two stay matched (2026-11-23).
+    const summary = latestSummary(current());
+    const summaryNote = h('div', { class: 'profile-link' },
+      summary
+        ? [h('span', { class: 'muted small' }, `最新問題總結（${summary.date} 評估）`), h('span', {}, summary.text)]
+        : h('span', { class: 'muted small' }, '還沒有問題總結。評估後寫在「動作問題」，會顯示在這裡對照目標。'),
+      button(summary ? '打開動作問題' : '新增評估', () => {
+        close();
+        if (summary) assessmentSheet(current());
+        else editAssessment(current());
+      }, 'ghost'));
     const contra = h('textarea', { class: 'input', 'aria-label': '疼痛與禁忌' });
     contra.value = student.contraindications || '';
-    const current = () => store.get('students', student.id) || student;
+    contra.addEventListener('input', () => saveFields({ contraindications: contra.value }));
     const painButton = h('button', { type: 'button', class: 'btn list-item pain-pick' });
     const paintPain = () => {
       const pain = current().pain;
@@ -46,58 +87,44 @@ function editProfileSheet(student) {
       onScores: (map) => {
         const pain = { ...(current().pain || {}) };
         setPainMap(pain, map);
-        store.save('students', { ...current(), pain });
+        saveFields({ pain });
         paintPain();
       },
-      onPartNotes: (notes) => store.save('students', { ...current(), pain: { ...(current().pain || {}), painPartNotes: notes } }),
-      onNote: (value) => store.save('students', { ...current(), pain: { ...(current().pain || {}), painNote: value } }),
+      onPartNotes: (notes) => saveFields({ pain: { ...(current().pain || {}), painPartNotes: notes } }),
+      onNote: (value) => saveFields({ pain: { ...(current().pain || {}), painNote: value } }),
       onDone: paintPain,
     }));
     paintPain();
     const notes = h('textarea', { class: 'input', 'aria-label': '下次要注意的事' });
     notes.value = student.nextNotes || '';
+    notes.addEventListener('input', () => saveFields({ nextNotes: notes.value }));
     const others = store.all('students').filter((s) => s.id !== student.id);
     const hasRecords = store.all('sessions').some((s) => s.studentId === student.id);
     return h('div', { class: 'stack' },
-      h('div', { class: 'stepper-label' }, '姓名'), name,
-      h('div', { class: 'stepper-label' }, '生日（月日 4 碼，同名同姓時才需要，和日曆上寫的一樣）'), birthday,
+      status,
+      h('div', { class: 'stepper-label' }, '姓名'), name, nameHint,
+      h('div', { class: 'stepper-label' }, '生日（月日 4 碼，同名同姓時才需要，和日曆上寫的一樣）'), birthday, birthdayHint,
       h('div', { class: 'stepper-label' }, '日曆上的其他寫法（用、分開）'), aliases,
-      h('div', { class: 'stepper-label' }, '訓練目標'), goal,
+      h('div', { class: 'stepper-label' }, '訓練目標'), goal, summaryNote,
       h('div', { class: 'stepper-label' }, '疼痛與禁忌'), contra, painButton,
       h('div', { class: 'stepper-label' }, '下次要注意的事'), notes,
-      button('儲存', () => {
-        const nextName = name.value.trim();
-        if (!nextName) { toast('姓名不可空白'); return; }
-        const day = cleanBirthday(birthday.value);
-        if (birthday.value.trim() && !day) { toast('生日請寫月日 4 碼，例如 0828'); return; }
-        store.save('students', {
-          ...current(),
-          name: nextName,
-          birthday: day,
-          aliases: aliases.value.split(/[、,，]/).map((a) => a.trim()).filter(Boolean),
-          goal: goal.value,
-          contraindications: contra.value,
-          nextNotes: notes.value,
-          isNew: false,
-        });
-        close();
-        back();
-        go('overview', { studentId: student.id });
-      }, 'primary'),
+      button('完成', close, 'big primary'),
       !hasRecords && others.length > 0 && h('div', { class: 'stack' },
         h('div', { class: 'stepper-label' }, '這其實是舊學生的另一個寫法？點選合併：'),
         others.map((other) => button(other.name, () => {
           const merged = findStudentByName(others, other.name);
-          store.save('students', { ...merged, birthday: merged.birthday || student.birthday || '', aliases: [...new Set([...(merged.aliases || []), student.name])] });
-          store.save('students', { ...student, deleted: true });
+          const self = current();
+          store.save('students', { ...merged, birthday: merged.birthday || self.birthday || '', aliases: [...new Set([...(merged.aliases || []), self.name])] });
+          store.save('students', { ...self, deleted: true });
+          changed = false;
           close();
           back();
           go('overview', { studentId: merged.id });
-          toast(`已把 ${student.name} 併入 ${merged.name}`, {
+          toast(`已把 ${self.name} 併入 ${merged.name}`, {
             label: '復原',
             run: () => {
               store.save('students', merged);
-              store.save('students', { ...student, deleted: false });
+              store.save('students', { ...self, deleted: false });
               back();
               go('overview', { studentId: student.id });
             },
@@ -105,17 +132,18 @@ function editProfileSheet(student) {
         }, 'list-item'))),
       h('div', { class: 'stack' },
         button('刪除這位學生的所有紀錄', () => confirmSheet(
-          `刪除 ${student.name}`,
-          `會刪除 ${student.name} 的資料與所有上課紀錄，所有裝置和 Google 雲端同步後都會清除，無法復原。雲端 PDF 資料夾裡已匯出的 PDF 要另外手動刪除。`,
+          `刪除 ${current().name}`,
+          `會刪除 ${current().name} 的資料與所有上課紀錄，所有裝置和 Google 雲端同步後都會清除，無法復原。雲端 PDF 資料夾裡已匯出的 PDF 要另外手動刪除。`,
           '確定刪除',
           () => {
             store.eraseStudent(student.id);
+            changed = false;
             close();
             home();
             toast(`已刪除 ${student.name} 的所有紀錄`);
           },
         ), 'ghost danger-text')));
-  });
+  }, { onClose: () => { if (changed) refreshView(); } });
 }
 
 // Each past class can be opened again and changed (2026-11-16). The change is stored and sent only with 存檔上傳,
@@ -188,6 +216,19 @@ function textCard(student, span, title, iconName, value, emptyText, className = 
   return card(span, title, iconName, open, value
     ? h('span', { class: 'card-text' }, text)
     : h('span', { class: 'card-text' }, h('span', { class: 'card-empty' }, emptyText)), value ? className : '');
+}
+
+/** Movement problems from the latest assessment (2026-11-23): how many are still there, and the first ones by name. */
+function problemCard(student, span) {
+  const latest = latestAssessment(student);
+  const open = (latest?.problems || []).filter((p) => p.status !== 'solved');
+  return card(span, '動作問題', null, () => (latest ? assessmentSheet(student) : editAssessment(student)), latest
+    ? [
+      h('span', { class: 'card-head' }, problemCountText(latest) || '沒有問題'),
+      open.length > 0 && h('span', { class: 'problem-card-list' }, open.slice(0, 2).map((p) => h('span', {}, problemText(p)))),
+      h('span', { class: 'muted small' }, `${shortDate(latest.date)} 評估${open.length > 2 ? `・還有 ${open.length - 2} 個` : ''}`),
+    ]
+    : h('span', { class: 'card-empty' }, '還沒評估，點一下新增'));
 }
 
 function termCard(studentId, todaySession, count) {
@@ -468,14 +509,16 @@ export function overviewView({ studentId }) {
     h('main', { class: 'page bento' },
       textCard(student, 'span-3', '疼痛與禁忌', 'warn', student.contraindications, '還沒填寫，點一下填寫', 'is-alert'),
       textCard(student, 'span-3', '下次要注意', null, student.nextNotes, '沒有註記'),
-      textCard(student, 'span-2', '訓練目標', null, student.goal, '還沒填寫，點一下填寫'),
+      // The goal sits beside the movement problems so the two can be read against each other (2026-11-23).
+      textCard(student, 'span-3', '訓練目標', null, student.goal, '還沒填寫，點一下填寫'),
+      problemCard(student, 'span-3'),
       termCard(studentId, todaySession, count),
       nextCard(student),
+      statusCard(history, 'span-2'),
       learnedCard(history, 'span-3'),
       painCard(history, student),
-      statusCard(history, pilatesOnly ? 'span-3' : 'span-2'),
-      !pilatesOnly && weightCard(history, 'span-2'),
-      bodyCard(student, pilatesOnly ? 'span-3' : 'span-2')),
+      !pilatesOnly && weightCard(history, 'span-3'),
+      bodyCard(student, pilatesOnly ? 'span-6' : 'span-3')),
     h('div', { class: 'action-bar' },
       button('排下次', () => go('plan', { studentId }), classFirst ? '' : 'primary'),
       button(inClass ? '繼續上課' : '開始上課', () => go('record', { studentId }), classFirst ? 'primary' : '')));

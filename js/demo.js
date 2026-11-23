@@ -49,6 +49,25 @@ export function loadDemo() {
       { date: dayOffset(-100), weight: 63.4, fat: 28.2, muscle: 23.1 },
       { date: dayOffset(-10), weight: 62.6, fat: 26.9, muscle: 23.8 },
     ],
+    assessments: [
+      {
+        id: 'demo_as1', date: dayOffset(-35), createdAt: 1, summary: '下蹲時左膝會往內倒、骨盆往前翻，所以爬樓梯膝蓋容易痛。先練臀部出力和核心穩定。',
+        problems: [
+          { id: 'demo_pb1', text: '深蹲膝內夾', parts: ['左膝'], status: 'open' },
+          { id: 'demo_pb2', text: '骨盆前傾', parts: ['骨盆', '下背'], status: 'open' },
+          { id: 'demo_pb3', text: '踝背屈不足', parts: ['左踝'], status: 'open' },
+        ],
+      },
+      {
+        id: 'demo_as2', date: dayOffset(-5), createdAt: 2, summary: '左膝往內倒比上次少，腳踝也比較能彎。接下來加單腳的練習，讓兩邊一樣穩。',
+        problems: [
+          { id: 'demo_pb1', text: '深蹲膝內夾', parts: ['左膝'], status: 'better', carried: true },
+          { id: 'demo_pb2', text: '骨盆前傾', parts: ['骨盆', '下背'], status: 'open', carried: true },
+          { id: 'demo_pb3', text: '踝背屈不足', parts: ['左踝'], status: 'solved', carried: true },
+          { id: 'demo_pb4', text: '單腳站骨盆下沉', parts: [], status: 'open' },
+        ],
+      },
+    ],
   });
   store.saveFromSync('students', {
     id: 'demo_s2', name: '示範學員 B', aliases: [], demo: true, updatedAt: 1,

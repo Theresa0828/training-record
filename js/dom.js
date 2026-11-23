@@ -135,12 +135,13 @@ export function currentView() {
 }
 
 /** Slides up a panel over the current view. Returns a function that closes it. */
-export function openSheet(title, build, { wide = false } = {}) {
+export function openSheet(title, build, { wide = false, onClose = null } = {}) {
   const root = document.getElementById('sheet-root');
   let closed = false;
   const close = () => {
     if (closed) return;
     closed = true;
+    onClose?.();
     // It stops taking taps right away, so the exit animation can never catch a finger.
     overlay.classList.add('closing');
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -287,8 +288,12 @@ export function installKeyboardLift() {
   if (!viewport) return;
   const root = document.documentElement.style;
   let lastCovered = 0;
+  // iPad Chrome and Safari ignore touch-action for a two-finger pinch; their own gesture events can stop it (2026-11-23).
+  for (const type of ['gesturestart', 'gesturechange']) document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
   const update = () => {
-    const covered = Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop));
+    // A page left zoomed in shrinks the visual viewport too; that is not a keyboard, so no room is made for one.
+    const zoomed = (viewport.scale || 1) > 1.01;
+    const covered = zoomed ? 0 : Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop));
     root.setProperty('--keyboard', `${covered}px`);
     root.setProperty('--vv-top', `${Math.max(0, Math.round(viewport.offsetTop))}px`);
     root.setProperty('--vv-height', `${Math.round(viewport.height)}px`);
