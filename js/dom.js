@@ -290,7 +290,25 @@ export function installKeyboardLift() {
   let lastCovered = 0;
   // iPad Chrome and Safari ignore touch-action for a two-finger pinch; their own gesture events can stop it (2026-11-23).
   for (const type of ['gesturestart', 'gesturechange']) document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+  // A second finger moving is always a pinch here (nothing in the app uses two fingers), so it never reaches the browser.
+  document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+  // If the page still ends up zoomed in (seen on iPad 2026-11-23, about 7 %), rewriting the viewport tag makes iOS
+  // apply its limits again and return to normal size. Not while typing, when the keyboard is what shrinks the view.
+  const meta = document.querySelector('meta[name="viewport"]');
+  const baseViewport = meta?.content || '';
+  let unzooming = false;
+  const unzoom = () => {
+    if (!meta || unzooming || (viewport.scale || 1) <= 1.01 || document.activeElement?.matches?.(TYPED)) return;
+    unzooming = true;
+    meta.content = `${baseViewport}, minimum-scale=1, user-scalable=no`;
+    setTimeout(() => { meta.content = baseViewport; unzooming = false; }, 400);
+  };
+  let unzoomTimer = 0;
+  const unzoomSoon = () => { clearTimeout(unzoomTimer); unzoomTimer = setTimeout(unzoom, 250); };
+  document.addEventListener('touchend', (e) => { if (!e.touches.length) unzoomSoon(); }, { passive: true });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') unzoomSoon(); });
   const update = () => {
+    if ((viewport.scale || 1) > 1.01) unzoomSoon();
     // A page left zoomed in shrinks the visual viewport too; that is not a keyboard, so no room is made for one.
     const zoomed = (viewport.scale || 1) > 1.01;
     const covered = zoomed ? 0 : Math.max(0, Math.round(window.innerHeight - viewport.height - viewport.offsetTop));
