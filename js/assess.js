@@ -120,9 +120,10 @@ export function editAssessment(student, assessmentId = null, onDone = null) {
 
     const drawQuick = () => {
       const used = new Set(a.problems.map((p) => p.text));
+      // replaceChildren is the DOM's own: a false here would show as the word "false" (2026-11-24).
       quick.replaceChildren(...chooserOptions(DEFAULT_PROBLEMS, addedProblems()).filter((name) => !used.has(name))
         .map((name) => button(`＋ ${name}`, () => addProblem(name), 'chip-btn chip-add')),
-      addedProblems().length > 0 && button('整理我加的', () => ownProblemsSheet(drawQuick), 'ghost'));
+      ...(addedProblems().length > 0 ? [button('整理我加的', () => ownProblemsSheet(drawQuick), 'ghost')] : []));
     };
 
     const removeProblem = (problem) => {
