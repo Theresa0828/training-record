@@ -1,7 +1,7 @@
 // Plans the next class: starts from last time, then the teacher tweaks it.
 import { h, button, holdButton, back, backButton, go, openSheet, toast, dismissActionToast } from './dom.js';
 import * as store from './store.js';
-import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, swapRow, commonSprings, moveRow, BAND, springKind } from './core.js';
+import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, swapRow, commonSprings, moveRow, BAND, springKind, patternCounts } from './core.js';
 import { exercisePicker, rememberSwaps } from './library.js';
 import { handoutButton } from './handout.js';
 import { springEditor } from './spring.js';
@@ -189,9 +189,19 @@ export function planView({ studentId }) {
     return rowEl;
   }
 
+  // How many strength exercises of each category, so a missing one shows at a glance (2026-11-24).
+  const balance = h('p', { class: 'plan-balance', 'aria-live': 'polite' });
+  function drawBalance() {
+    const counts = patternCounts(plan.rows, (id) => store.get('exercises', id));
+    balance.hidden = !counts.length;
+    balance.replaceChildren(h('span', { class: 'muted small' }, '這堂重訓'),
+      ...counts.map((c) => h('span', { class: 'balance-item' }, c.short, h('strong', {}, String(c.count)))));
+  }
+
   function draw() {
     list.replaceChildren(...plan.rows.map(rowCard));
     if (!plan.rows.length) list.append(h('p', { class: 'muted' }, '還沒有動作，先加入第一個。'));
+    drawBalance();
   }
 
   draw();
@@ -219,6 +229,7 @@ export function planView({ studentId }) {
           : h('p', { class: 'muted' }, '這位學生還沒有紀錄'),
         button('看完整總覽', () => go('overview', { studentId }), 'ghost')),
       h('div', { class: 'plan-main stack' },
+        balance,
         list,
         button('＋ 加入動作', () => openSheet('加入動作', (close) => exercisePicker(last?.kind || 'strength', (exercise) => {
           close();

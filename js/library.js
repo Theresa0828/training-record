@@ -3,6 +3,7 @@ import * as store from './store.js';
 import {
   newId, APPARATUS, BODY_GROUPS, exerciseGroups, withGroups, usageCounts, searchExercises, commonExercises, swapOptions, learnAlternative,
   PILATES_REGIONS, PILATES_POSTURES, PILATES_FOCUS, PILATES_STABILITY, PILATES_MOBILITY, PILATES_LIST_KEYS, PILATES_LEVELS, cleanPilatesTags, pilatesTagText, filterPilates, pilatesSteps,
+  STRENGTH_PATTERNS, PLANE_PATTERNS, STRENGTH_PLANES, STRENGTH_SIDES, MUSCLES, cleanStrengthTags, strengthTagText, filterStrength,
 } from './core.js';
 import { handoutSheet, importHandoutSheet } from './handout.js';
 
@@ -25,7 +26,7 @@ function groupsOf(items, kind) {
 /** A name with its classification underneath, so similar Pilates names can be told apart. */
 function exerciseLabel(exercise, prefix = '') {
   // The apparatus comes first, because the same name exists on several (Beats on Reformer and on Chair).
-  const tags = exercise.kind === 'pilates' ? [exercise.group, pilatesTagText(exercise.tags)].filter(Boolean).join('・') : '';
+  const tags = exercise.kind === 'pilates' ? [exercise.group, pilatesTagText(exercise.tags)].filter(Boolean).join('・') : strengthTagText(exercise.tags) || '未分類';
   return [h('span', { class: 'pick-name' }, `${prefix}${exercise.name}`), tags && h('small', { class: 'pick-tags' }, tags)];
 }
 
@@ -44,17 +45,49 @@ function emptyFilters() {
   return { region: '', posture: '', stability: '', mobility: '', focus: '', level: '', apparatus: '' };
 }
 
+// Strength filters (2026-11-24): 部位, then 類別 with 方向 beside it once a push or pull is chosen, then 單雙側.
+function strengthLayout(filters) {
+  return [
+    [{ key: 'part', label: '部位', groups: [BODY_GROUPS] }],
+    [{ key: 'pattern', label: '類別', groups: [STRENGTH_PATTERNS.slice(0, 4), STRENGTH_PATTERNS.slice(4)] },
+      ...(PLANE_PATTERNS.includes(filters.pattern) ? [{ key: 'plane', label: '方向', groups: [STRENGTH_PLANES] }] : [])],
+    [{ key: 'side', label: '單雙側', groups: [STRENGTH_SIDES] }],
+  ];
+}
+
+function emptyStrengthFilters() {
+  return { part: '', pattern: '', plane: '', side: '' };
+}
+
+function strengthHas(items, key, value) {
+  if (key === 'part') return items.some((e) => exerciseGroups(e).includes(value));
+  if (key === 'pattern') return items.some((e) => (e.tags?.patterns || []).includes(value));
+  return items.some((e) => e.tags?.[key] === value);
+}
+
 /**
  * Rows of filters for Pilates: 部位, 姿勢, 穩定, 活動度, 重點, 程度 and, once there is more than one, 器材.
  * One tap per row narrows the list, so a suitable exercise is a few taps away. Only values in use are offered.
  */
 function pilatesFinder(items, filters, onChange, renderList) {
-  const has = (key, value) => items.some((e) => (PILATES_LIST_KEYS.includes(key) ? (e.tags?.[key] || []).includes(value) : e.tags?.[key] === value));
+  return finder('pilates', items, filters, onChange, renderList);
+}
+
+function finder(kind, items, filters, onChange, renderList) {
+  const strength = kind === 'strength';
+  const has = strength
+    ? (key, value) => strengthHas(items, key, value)
+    : (key, value) => items.some((e) => (PILATES_LIST_KEYS.includes(key) ? (e.tags?.[key] || []).includes(value) : e.tags?.[key] === value));
   const valueOf = (key, label) => (key === 'level' ? PILATES_LEVELS.indexOf(label) + 1 : label);
   const apparatus = [...new Set(items.map((e) => e.group).filter(Boolean))].sort();
   const chip = (key, value, text = value, cls = 'chip-btn') => {
     const wanted = valueOf(key, value);
-    return button(text, () => { filters[key] = filters[key] === wanted ? '' : wanted; onChange(); }, cls,
+    return button(text, () => {
+      filters[key] = filters[key] === wanted ? '' : wanted;
+      // A direction only means something for a push or pull.
+      if (key === 'pattern' && !PLANE_PATTERNS.includes(filters.pattern)) filters.plane = '';
+      onChange();
+    }, cls,
       { 'aria-pressed': filters[key] === wanted ? 'true' : 'false', 'aria-label': value });
   };
   // Each field: its groups with only the values some exercise has; empty groups and fields drop out.
@@ -74,14 +107,14 @@ function pilatesFinder(items, filters, onChange, renderList) {
           g.values.map((value) => chip(key, value, value.slice(g.prefix.length), 'chip-btn seg-btn')))
         : h('span', { class: 'chip-group' }, g.values.map((value) => chip(key, value)))))));
   };
-  const rows = FILTER_LAYOUT.map((fields) => fields.map(field).filter(Boolean)).filter((fields) => fields.length);
+  const rows = (strength ? strengthLayout(filters) : FILTER_LAYOUT).map((fields) => fields.map(field).filter(Boolean)).filter((fields) => fields.length);
   const active = Object.values(filters).some(Boolean);
-  const matches = filterPilates(items, filters);
+  const matches = strength ? filterStrength(items, filters) : filterPilates(items, filters);
   return h('section', { class: 'finder' },
     rows.map((fields) => h('div', { class: 'finder-row' }, fields)),
     active && h('div', { class: 'row-between finder-count' },
       h('strong', {}, `符合 ${matches.length} 個`),
-      button('清除條件', () => { Object.assign(filters, emptyFilters()); onChange(); }, 'ghost')),
+      button('清除條件', () => { Object.assign(filters, strength ? emptyStrengthFilters() : emptyFilters()); onChange(); }, 'ghost')),
     active && (matches.length ? renderList(matches) : h('p', { class: 'muted' }, '沒有符合的動作，少選一個條件試試。')));
 }
 
@@ -90,18 +123,21 @@ function addExerciseSheet(kind, name, group, onAdded) {
   openSheet('新增動作', (close) => {
     const input = h('input', { class: 'input', value: name || '', maxlength: 40, placeholder: '動作名稱', 'aria-label': '動作名稱' });
     const choice = kind === 'strength' ? groupPicker(group && group !== '其他' ? [group] : []) : null;
+    const tagChoice = kind === 'strength' ? strengthTagEditor(null) : null;
     let chosen = group || '其他';
     const groups = h('div', { class: 'chips' });
     const drawGroups = () => groups.replaceChildren(...[...new Set([...groupsOf(byKind(kind), kind), '其他'])].map((option) => button(option, () => { chosen = option; drawGroups(); }, 'chip-btn', { 'aria-pressed': option === chosen ? 'true' : 'false' })));
     if (!choice) drawGroups();
     return h('div', { class: 'stack' }, input,
       choice ? choice.el : h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '器材'), groups),
+      tagChoice?.el,
       button('加入', () => {
         const clean = input.value.trim();
         if (!clean) { toast('名稱不可空白'); return; }
         const same = byKind(kind).find((item) => item.name === clean);
         const fresh = { id: newId('ex'), name: clean, kind, group: chosen };
-        const exercise = same || (choice ? withGroups(fresh, choice.value()) : fresh);
+        const tags = tagChoice?.value();
+        const exercise = same || (choice ? withGroups({ ...fresh, ...(tags ? { tags, tagsEdited: true } : {}) }, choice.value()) : fresh);
         if (!same) store.save('exercises', exercise);
         close();
         onAdded(exercise);
@@ -170,6 +206,7 @@ export function exercisePicker(defaultKind, onPick, { current = null } = {}) {
   let group = null;
   let managing = false;
   const filters = emptyFilters();
+  const strengthFilters = emptyStrengthFilters();
   const results = h('div', { class: 'picker-results' });
   const search = h('input', { class: 'input', placeholder: '搜尋動作，中英文都可以', 'aria-label': '搜尋動作' });
   const tabs = h('div', { class: 'segmented' });
@@ -236,10 +273,10 @@ export function exercisePicker(defaultKind, onPick, { current = null } = {}) {
       parts.push(block('常用動作', common.length || managing ? (managing ? items : common) : [],
         items.length > 0 && button(managing ? '完成' : '設定常用', () => { managing = !managing; draw(); }, 'ghost')));
       if (!common.length && !managing) parts.push(h('p', { class: 'muted' }, '用過的動作會自動排到這裡，也可以按「設定常用」自己挑。'));
-      const tagged = kind === 'pilates' && items.some((item) => item.tags);
+      const tagged = items.some((item) => item.tags);
       if (!managing && tagged) {
         parts.push(h('section', { class: 'pick-block' }, h('h3', {}, '依分類找'),
-          pilatesFinder(items, filters, draw, (list) => h('div', { class: 'pick-grid' }, list.map(pick)))));
+          finder(kind, items, kind === 'strength' ? strengthFilters : filters, draw, (list) => h('div', { class: 'pick-grid' }, list.map(pick)))));
         parts.push(button('＋ 新增動作', add, 'add-row'));
       }
       if (!managing && !tagged) {
@@ -263,6 +300,40 @@ export function exercisePicker(defaultKind, onPick, { current = null } = {}) {
   });
   draw();
   return h('div', { class: 'stack' }, tabs, search, results);
+}
+
+/**
+ * Chips for the strength classification (2026-11-24): 類別 (several, the first tapped is the main one),
+ * 方向 for a push or pull, 單雙側 and the main muscles. A hand edit is kept when the built-in list changes.
+ */
+function strengthTagEditor(initial) {
+  const tags = { patterns: [...(initial?.patterns || [])], plane: initial?.plane || '', side: initial?.side || '', muscles: [...(initial?.muscles || [])] };
+  const area = h('div', { class: 'stack-sm' });
+  const toggle = (list, value) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+  const row = (label, chips) => h('div', { class: 'finder-row', role: 'group', 'aria-label': label },
+    h('span', { class: 'finder-label' }, label), h('div', { class: 'chips' }, chips));
+  const one = (key, values) => values.map((value) => button(value, () => { tags[key] = tags[key] === value ? '' : value; draw(); },
+    'chip-btn', { 'aria-pressed': tags[key] === value ? 'true' : 'false' }));
+  function draw() {
+    const main = tags.patterns.length > 1 ? tags.patterns[0] : '';
+    const muscles = [...MUSCLES, ...tags.muscles.filter((m) => !MUSCLES.includes(m))];
+    area.replaceChildren(...[
+      h('div', { class: 'stepper-label' }, '分類（找動作、算學習程度用；類別可以複選，第一個點的是主要類別）'),
+      row('類別', STRENGTH_PATTERNS.map((value) => button([value, value === main ? h('small', { class: 'chip-main' }, '主要') : null], () => {
+        tags.patterns = toggle(tags.patterns, value);
+        draw();
+      }, 'chip-btn', { 'aria-pressed': tags.patterns.includes(value) ? 'true' : 'false', 'aria-label': value === main ? `${value}，主要類別` : value }))),
+      tags.patterns.some((p) => PLANE_PATTERNS.includes(p)) && row('方向', one('plane', STRENGTH_PLANES)),
+      row('單雙側', one('side', STRENGTH_SIDES)),
+      row('主要肌群', muscles.map((value) => button(value, () => {
+        if (!tags.muscles.includes(value) && tags.muscles.length >= 6) { toast('主要肌群最多 6 個'); return; }
+        tags.muscles = toggle(tags.muscles, value);
+        draw();
+      }, 'chip-btn', { 'aria-pressed': tags.muscles.includes(value) ? 'true' : 'false' }))),
+    ].filter(Boolean));
+  }
+  draw();
+  return { el: area, value: () => cleanStrengthTags(tags) };
 }
 
 /** Chips for the Pilates classification. The teacher's changes are kept even when the handout is imported again. */
@@ -308,9 +379,11 @@ function editSheet(exercise) {
     const parts = strength ? groupPicker(exerciseGroups(exercise).filter((g) => g !== '其他')) : null;
     const group = strength ? null : h('input', { class: 'input', value: exercise.group || '', 'aria-label': '器材' });
     const tags = exercise.kind === 'pilates' ? tagEditor(exercise) : null;
+    const strengthTags = strength ? strengthTagEditor(exercise.tags) : null;
     return h('div', { class: 'stack' },
       h('div', { class: 'stepper-label' }, '動作名稱'), name,
       parts ? parts.el : [h('div', { class: 'stepper-label' }, '器材'), group],
+      strengthTags?.el,
       tags && h('div', { class: 'stepper-label' }, '分類（找動作和建議退階、進階用）'),
       tags?.el,
       button(exercise.pinned ? '★ 已設為常用，點一下取消' : '☆ 設為常用', () => {
@@ -340,6 +413,10 @@ function editSheet(exercise) {
             const value = tags.value();
             // Compare cleaned tags, so tags saved before a new field existed do not count as a hand edit.
             if (JSON.stringify(value) !== JSON.stringify(cleanPilatesTags(exercise.tags))) Object.assign(next, { tags: value, tagsEdited: true });
+          }
+          if (strengthTags) {
+            const value = strengthTags.value();
+            if (JSON.stringify(value) !== JSON.stringify(cleanStrengthTags(exercise.tags))) Object.assign(next, { tags: value, tagsEdited: true });
           }
           store.save('exercises', next);
           close();
@@ -389,6 +466,7 @@ function importSheet() {
 
 // Kept while the app is open, so going into an exercise and back keeps the same filters.
 const libraryFilters = emptyFilters();
+const libraryStrengthFilters = emptyStrengthFilters();
 
 export function libraryView() {
   const open = (exercise) => (exercise.handoutId ? handoutSheet(exercise, { onEdit: editSheet }) : editSheet(exercise));
@@ -413,8 +491,21 @@ export function libraryView() {
     draw();
     return h('section', { class: 'stack span-6' }, h('h2', {}, `皮拉提斯（${items.length}）`), area);
   };
-  const section = (kind, title) => {
-    const items = byKind(kind);
+  const strengthSection = () => {
+    const items = byKind('strength');
+    if (!items.some((item) => item.tags)) return section('strength', '重訓');
+    const area = h('div', { class: 'stack' });
+    const draw = () => {
+      const active = Object.values(libraryStrengthFilters).some(Boolean);
+      area.replaceChildren(...[
+        h('div', { class: 'card' }, finder('strength', items, libraryStrengthFilters, draw, (list) => h('div', { class: 'pick-grid' }, list.map(itemButton)))),
+        !active && groupCards('strength', items),
+      ].filter(Boolean));
+    };
+    draw();
+    return h('section', { class: 'stack span-6' }, h('h2', {}, `重訓（${items.length}）`), area);
+  };
+  const groupCards = (kind, items) => {
     const groups = new Map();
     // A strength exercise in several body parts shows under each of them.
     for (const item of items) {
@@ -423,12 +514,16 @@ export function libraryView() {
         groups.get(group).push(item);
       }
     }
+    return h('div', { class: 'bento' }, [...groups.entries()].map(([group, list]) => h('div', { class: `card stack-sm ${list.length > 10 ? 'span-6' : 'span-3'}` },
+      h('h3', {}, group),
+      h('div', { class: 'pick-grid' }, list.map(itemButton)))));
+  };
+  const section = (kind, title) => {
+    const items = byKind(kind);
     return h('section', { class: 'stack span-6' },
       h('h2', {}, `${title}（${items.length}）`),
       items.length === 0 && h('p', { class: 'muted' }, kind === 'pilates' ? '還沒有動作，可以按「匯入講義」。' : '還沒有動作，可以按「批次匯入」。'),
-      h('div', { class: 'bento' }, [...groups.entries()].map(([group, list]) => h('div', { class: `card stack-sm ${list.length > 10 ? 'span-6' : 'span-3'}` },
-        h('h3', {}, group),
-        h('div', { class: 'pick-grid' }, list.map(itemButton))))));
+      groupCards(kind, items));
   };
   return h('div', { class: 'screen has-tabs' },
     h('header', { class: 'topbar page-title library-bar' },
@@ -437,6 +532,6 @@ export function libraryView() {
         button('匯入講義', importHandoutSheet, 'ghost'),
         button('批次匯入', importSheet, 'ghost'),
         button('＋ 新增動作', () => addExerciseSheet('strength', '', null, () => refreshView()), 'primary'))),
-    h('main', { class: 'page stack-lg' }, pilatesSection(), section('strength', '重訓')),
+    h('main', { class: 'page stack-lg' }, pilatesSection(), strengthSection()),
     tabBar('library'));
 }

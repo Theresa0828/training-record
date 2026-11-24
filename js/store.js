@@ -1,7 +1,17 @@
 // Keeps every record in memory for instant reads and writes through to IndexedDB in the background.
-import { SEED_EXERCISES, REMOVED_SEEDS } from './seed.js';
+import { SEED_EXERCISES, REMOVED_SEEDS, SEED_TAGS } from './seed.js';
 
 const REMOVED_IDS = new Set(REMOVED_SEEDS.map((exercise) => exercise.id));
+
+/**
+ * A built-in exercise saved before 2026-11-24 (or from another device) carries no classification, or an older one.
+ * Until the teacher re-classifies it by hand (tagsEdited), it shows the current built-in one. Only in memory:
+ * nothing is rewritten or re-uploaded because of this.
+ */
+function withSeedTags(record) {
+  const tags = SEED_TAGS.get(record?.id);
+  return tags && !record.tagsEdited ? { ...record, tags } : record;
+}
 const DB_NAME = 'training-record';
 const COLLECTIONS = ['students', 'exercises', 'sessions', 'plans', 'events', 'options', 'photos'];
 // Handout text and images stay on this device: never in memory, never synced.
@@ -48,7 +58,7 @@ function readAll(name) {
 export async function loadStore() {
   db = await open();
   await Promise.all(COLLECTIONS.map(async (name) => {
-    for (const record of await readAll(name)) memory[name].set(record.id, record);
+    for (const record of await readAll(name)) memory[name].set(record.id, name === 'exercises' ? withSeedTags(record) : record);
   }));
   for (const item of await readAll('meta')) meta.set(item.id, item.value);
   for (const exercise of SEED_EXERCISES) {
@@ -157,7 +167,7 @@ export function save(collection, record) {
 
 /** Stores a record from Drive without sending it back. */
 export function saveFromSync(collection, record) {
-  memory[collection].set(record.id, record);
+  memory[collection].set(record.id, collection === 'exercises' ? withSeedTags(record) : record);
   queue(collection, record);
   flushSoon();
 }

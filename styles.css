@@ -773,8 +773,12 @@ button.stat-card:active { transform: scale(.985); }
 .finder-row { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: flex-start; }
 .finder-field { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 8px; align-items: start; min-width: 0; flex: 1 1 auto; }
 .finder-row > .finder-field:not(:first-child) { flex: 0 1 auto; grid-template-columns: auto minmax(0, 1fr); }
+/* On a phone the second field wraps to its own line: then its chips start where every other row's do. */
+@media (max-width: 600px) { .finder-row > .finder-field:not(:first-child) { grid-template-columns: 56px minmax(0, 1fr); } }
 /* The name sits level with the first line of chips, so a field that wraps never looks like it owns the next row. */
 .finder-label { font-size: 16px; line-height: 44px; color: var(--fg); font-weight: 700; white-space: nowrap; }
+/* In the edit sheets the names are 2–3 characters: one width keeps every row of chips starting at the same place. */
+.finder-row > .finder-label { min-width: 3em; }
 .finder-chips { display: flex; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
 .chip-group { display: flex; flex-wrap: wrap; gap: 6px; }
 .finder .chip-btn { min-height: 44px; padding-inline: 12px; }
@@ -1066,6 +1070,10 @@ button.stat-card:active { transform: scale(.985); }
 
 /* Strength body parts, several allowed: the main one carries a small tag. */
 .chip-main { margin-left: 6px; padding: 0 6px; border-radius: 99px; background: var(--on-primary); color: var(--primary-text); font-size: 13px; font-weight: 500; }
+/* Plan: strength exercises per category, e.g. 蹲 1・推 2 (2026-11-24). */
+.plan-balance { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 0; }
+.balance-item { display: inline-flex; align-items: baseline; gap: 4px; font-size: 16px; font-weight: 500; }
+.balance-item strong { font-size: 20px; font-weight: 700; }
 
 /* Calendar choice in 設定: several can be on, each with its own tick. */
 .btn.cal-item { display: flex; align-items: center; gap: 10px; }

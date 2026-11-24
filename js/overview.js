@@ -352,7 +352,7 @@ function learnedSheet(summary) {
 
 // Every body part has a tile of the same size, so the card never grows as more exercises are learned.
 function learnedCard(history, span) {
-  const summary = learnedSummary(history, store.all('exercises'), (id) => store.get('exercises', id));
+  const summary = learnedSummary(history, store.all('exercises'), (id) => store.get('exercises', id), { byPattern: true });
   const level = pilatesLevel(history);
   const showStrength = summary.strength.count > 0 || summary.pilates.count === 0;
   const tiles = (groups) => h('span', { class: 'learn-tiles' }, groups.map((group) => learnedTile(group.group, group.learned, group.total)));

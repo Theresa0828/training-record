@@ -29,6 +29,63 @@ export const BAND = '彈力帶';
 export const BAND_COLORS = ['黃', '紅', '綠', '藍', '黑'];
 export const BODY_GROUPS = ['下肢', '胸', '背', '肩', '手臂', '核心'];
 
+// How strength exercises are classified (2026-11-24, docs/重訓動作分類.md section 2).
+export const STRENGTH_PATTERNS = ['蹲類', '硬舉類', '上肢推', '上肢拉', '核心', '其他'];
+/** Short names for the learning grid and the plan's count. */
+export const PATTERN_SHORT = { 蹲類: '蹲', 硬舉類: '硬舉', 上肢推: '推', 上肢拉: '拉', 核心: '核心', 其他: '其他' };
+/** Only pushes and pulls have a direction. */
+export const PLANE_PATTERNS = ['上肢推', '上肢拉'];
+export const STRENGTH_PLANES = ['水平', '垂直'];
+export const STRENGTH_SIDES = ['雙側', '單側'];
+/** Muscle words shared with the Pilates classification. */
+export const MUSCLES = ['股四頭肌', '臀肌', '腿後肌', '內收肌', '髖外展肌', '小腿肌', '髖屈肌', '腹肌', '腹斜肌', '背伸肌', '闊背肌', '肩胛肌群', '三角肌', '旋轉肌袖', '胸肌', '二頭肌', '三頭肌'];
+
+/** Keeps only known values. The first category is the main one; a direction only goes with a push or pull. */
+export function cleanStrengthTags(tags) {
+  if (!tags || typeof tags !== 'object') return null;
+  const patterns = [...new Set((Array.isArray(tags.patterns) ? tags.patterns : []).filter((p) => STRENGTH_PATTERNS.includes(p)))];
+  const clean = {
+    patterns,
+    plane: patterns.some((p) => PLANE_PATTERNS.includes(p)) && STRENGTH_PLANES.includes(tags.plane) ? tags.plane : '',
+    side: STRENGTH_SIDES.includes(tags.side) ? tags.side : '',
+    muscles: [...new Set((Array.isArray(tags.muscles) ? tags.muscles : []).filter((m) => typeof m === 'string' && m.trim()).map((m) => m.trim().slice(0, 12)))].slice(0, 6),
+  };
+  return clean.patterns.length || clean.side || clean.muscles.length ? clean : null;
+}
+
+/** The main category of a strength exercise, or 未分類. */
+export function mainPattern(exercise) {
+  return exercise?.tags?.patterns?.[0] || '未分類';
+}
+
+/** One short line under a strength exercise name, such as 上肢推・水平・雙側. */
+export function strengthTagText(tags) {
+  if (!tags?.patterns) return '';
+  return [tags.patterns.join('、'), tags.plane, tags.side].filter(Boolean).join('・');
+}
+
+/** Filters strength exercises by 部位, 類別, 方向 and 單雙側. Empty filters let everything through. */
+export function filterStrength(list, filters = {}) {
+  return list.filter((e) => (!filters.part || exerciseGroups(e).includes(filters.part))
+    && (!filters.pattern || (e.tags?.patterns || []).includes(filters.pattern))
+    && (!filters.plane || e.tags?.plane === filters.plane)
+    && (!filters.side || e.tags?.side === filters.side));
+}
+
+/**
+ * How many strength exercises of each main category a class or plan holds, such as 蹲 1・推 2,
+ * so a missing category shows at a glance. Categories with none are left out.
+ */
+export function patternCounts(rows, find = () => null) {
+  const counts = new Map();
+  for (const row of rows || []) {
+    if (row.kind !== 'strength') continue;
+    const pattern = mainPattern(find(row.exerciseId));
+    counts.set(pattern, (counts.get(pattern) || 0) + 1);
+  }
+  return [...STRENGTH_PATTERNS, '未分類'].filter((p) => counts.has(p)).map((p) => ({ pattern: p, short: PATTERN_SHORT[p] || p, count: counts.get(p) }));
+}
+
 /**
  * The calendars to read bookings from. Several are allowed, because the company books Pilates and
  * strength in separate calendars (2026-11-11). Older versions saved one id as calendarId.
@@ -502,7 +559,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v33';
+export const APP_VERSION = 'v34';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -791,7 +848,7 @@ const squeeze = (text) => String(text || '').toLowerCase().replace(/\s+/g, '');
 export function searchExercises(items, query) {
   const wanted = squeeze(query);
   if (!wanted) return items;
-  return items.filter((item) => [item.name, ...exerciseGroups(item), ...(item.aliases || [])].some((text) => squeeze(text).includes(wanted)));
+  return items.filter((item) => [item.name, ...exerciseGroups(item), ...(item.tags?.patterns || []), ...(item.aliases || [])].some((text) => squeeze(text).includes(wanted)));
 }
 
 /** The quick list: the ones the teacher pinned, then the most used. */
@@ -883,14 +940,18 @@ export function headline(text, limit = 10) {
   return { head: `${value.slice(0, end)}…`, rest: value.slice(end) };
 }
 
-/** Every exercise the student has really done, by body part or apparatus. */
-export function learnedSummary(history, library, find = () => null) {
+/**
+ * Every exercise the student has really done. Pilates goes by region. Strength goes by body part
+ * (the student report), or by category with `byPattern` (the overview's grid, 2026-11-24).
+ */
+export function learnedSummary(history, library, find = () => null, { byPattern = false } = {}) {
+  const strengthGroup = (exercise) => (byPattern ? PATTERN_SHORT[mainPattern(exercise)] || '未分類' : exercise?.group || '其他');
   const learned = new Map();
   for (const session of history) {
     for (const row of session.rows) {
       if (learned.has(row.exerciseId) || !row.sets.some((s) => s.done)) continue;
       const exercise = find(row.exerciseId);
-      const group = row.kind === 'pilates' ? exercise?.tags?.region || '未分類' : exercise?.group || '其他';
+      const group = row.kind === 'pilates' ? exercise?.tags?.region || '未分類' : strengthGroup(exercise);
       learned.set(row.exerciseId, { name: row.name, kind: row.kind, group });
     }
   }
@@ -899,11 +960,11 @@ export function learnedSummary(history, library, find = () => null) {
     const totals = new Map();
     for (const item of library) {
       if (item.kind !== kind) continue;
-      const group = kind === 'pilates' ? item.tags?.region || '未分類' : item.group;
+      const group = kind === 'pilates' ? item.tags?.region || '未分類' : strengthGroup(item);
       totals.set(group, (totals.get(group) || 0) + 1);
     }
     // A fixed list of groups, so the card keeps the same size however many exercises are learned.
-    const names = kind === 'strength' ? [...BODY_GROUPS] : [...PILATES_REGIONS];
+    const names = kind === 'pilates' ? [...PILATES_REGIONS] : byPattern ? STRENGTH_PATTERNS.map((p) => PATTERN_SHORT[p]) : [...BODY_GROUPS];
     for (const item of mine) if (!names.includes(item.group)) names.push(item.group);
     const groups = names.map((group) => {
       const items = mine.filter((item) => item.group === group);
