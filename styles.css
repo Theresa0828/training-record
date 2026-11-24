@@ -609,6 +609,11 @@ h1 small, .stepper-value small { font-weight: 400; }
 .fold-body { padding: 0 16px 16px; }
 .handout-tabs { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); grid-template-columns: none; }
 .library-bar { flex-wrap: wrap; }
+/* 重訓／皮拉提斯 switch: stays at the top while the list scrolls (2026-11-24). */
+.library-kinds { position: sticky; top: 0; z-index: 4; background: var(--bg); padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px)); }
+.library-kinds .segmented { max-width: 1008px; margin: 0 auto; }
+.library-kinds .chip-btn { min-height: 48px; font-size: 16px; gap: 8px; }
+.kind-count { margin-left: 8px; font-size: 13px; font-weight: 500; opacity: .8; }
 .library-bar h1 { white-space: nowrap; flex: 1 1 auto; }
 @media (max-width: 480px) { .library-bar h1 { flex-basis: 100%; } }
 .library-bar .topbar-actions { max-width: 100%; flex-wrap: wrap; margin-left: 0; }
@@ -742,7 +747,7 @@ button.stat-card:active { transform: scale(.985); }
    every control: the exercise list gives up height instead and scrolls on its own. */
 .record .topbar, .overview .topbar { position: sticky; top: 0; z-index: 4; background: var(--bg); }
 /* The pinned name bar sits on the green land in 砂色＋森林綠, so the land shows through instead of a sand stripe. */
-[data-palette="mint"] .record .topbar, [data-palette="mint"] .overview .topbar { background: var(--land); }
+[data-palette="mint"] .record .topbar, [data-palette="mint"] .overview .topbar, [data-palette="mint"] .library-kinds { background: var(--land); }
 .panel .equipment > .field > .stepper-label { display: none; }
 .panel .equip-grid { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(58px, 1fr); overflow-x: auto; scrollbar-width: none; }
 .panel .btn.equip-btn { min-height: 58px; padding-block: 4px; }

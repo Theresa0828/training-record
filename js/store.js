@@ -1,5 +1,6 @@
 // Keeps every record in memory for instant reads and writes through to IndexedDB in the background.
 import { SEED_EXERCISES, REMOVED_SEEDS, SEED_TAGS } from './seed.js';
+import { withTorsoGroup } from './core.js';
 
 const REMOVED_IDS = new Set(REMOVED_SEEDS.map((exercise) => exercise.id));
 
@@ -10,7 +11,8 @@ const REMOVED_IDS = new Set(REMOVED_SEEDS.map((exercise) => exercise.id));
  */
 function withSeedTags(record) {
   const tags = SEED_TAGS.get(record?.id);
-  return tags && !record.tagsEdited ? { ...record, tags } : record;
+  const fresh = tags && !record.tagsEdited ? { ...record, tags } : record;
+  return withTorsoGroup(fresh);
 }
 const DB_NAME = 'training-record';
 const COLLECTIONS = ['students', 'exercises', 'sessions', 'plans', 'events', 'options', 'photos'];

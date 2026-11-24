@@ -27,7 +27,18 @@ export function springSet(apparatus) {
 export const EQUIPMENT = ['啞鈴', '槓鈴', '壺鈴', '彈力帶', '六角槓', '藥球', '地雷管'];
 export const BAND = '彈力帶';
 export const BAND_COLORS = ['黃', '紅', '綠', '藍', '黑'];
-export const BODY_GROUPS = ['下肢', '胸', '背', '肩', '手臂', '核心'];
+export const BODY_GROUPS = ['下肢', '胸', '背', '肩', '手臂', '軀幹'];
+
+/**
+ * The strength body part 核心 is called 軀幹 since 2026-11-24, so it is never mixed up with the 核心 category.
+ * Exercises saved before keep the old word in storage and on Drive; it is read as 軀幹.
+ */
+export function withTorsoGroup(exercise) {
+  if (!exercise || exercise.kind === 'pilates') return exercise;
+  const rename = (g) => (g === '核心' ? '軀幹' : g);
+  if (exercise.group !== '核心' && !(exercise.groups || []).includes('核心')) return exercise;
+  return { ...exercise, group: rename(exercise.group), ...(Array.isArray(exercise.groups) ? { groups: exercise.groups.map(rename) } : {}) };
+}
 
 // How strength exercises are classified (2026-11-24, docs/重訓動作分類.md section 2).
 export const STRENGTH_PATTERNS = ['蹲類', '硬舉類', '上肢推', '上肢拉', '核心', '其他'];
@@ -559,7 +570,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v34';
+export const APP_VERSION = 'v35';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -1154,7 +1165,7 @@ export function bodyCompSummary(list, today) {
 
 /** Body parts in everyday words. Strength groups and Pilates regions share them where they mean the same. */
 export const LAY_REGIONS = {
-  下肢: '腿和臀部', 胸: '胸部', 背: '背部', 肩: '肩膀', 手臂: '手臂', 核心: '腹部（核心）',
+  下肢: '腿和臀部', 胸: '胸部', 背: '背部', 肩: '肩膀', 手臂: '手臂', 軀幹: '腹部（核心）', 核心: '腹部（核心）',
   脊椎: '脊椎活動', 肩臂: '肩膀和手臂', 全身: '全身',
 };
 

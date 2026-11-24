@@ -489,7 +489,7 @@ export function libraryView() {
       ].filter(Boolean));
     };
     draw();
-    return h('section', { class: 'stack span-6' }, h('h2', {}, `皮拉提斯（${items.length}）`), area);
+    return h('section', { class: 'stack span-6', 'aria-label': '皮拉提斯' }, area);
   };
   const strengthSection = () => {
     const items = byKind('strength');
@@ -503,7 +503,7 @@ export function libraryView() {
       ].filter(Boolean));
     };
     draw();
-    return h('section', { class: 'stack span-6' }, h('h2', {}, `重訓（${items.length}）`), area);
+    return h('section', { class: 'stack span-6', 'aria-label': '重訓' }, area);
   };
   const groupCards = (kind, items) => {
     const groups = new Map();
@@ -520,18 +520,35 @@ export function libraryView() {
   };
   const section = (kind, title) => {
     const items = byKind(kind);
-    return h('section', { class: 'stack span-6' },
-      h('h2', {}, `${title}（${items.length}）`),
+    return h('section', { class: 'stack span-6', 'aria-label': title },
       items.length === 0 && h('p', { class: 'muted' }, kind === 'pilates' ? '還沒有動作，可以按「匯入講義」。' : '還沒有動作，可以按「批次匯入」。'),
       groupCards(kind, items));
   };
+  // One kind at a time (2026-11-24): strength used to sit under every Pilates exercise and took a long scroll to reach.
+  // The switch stays at the top while the list scrolls, and this device remembers the last kind opened.
+  const shownKind = () => (store.getMeta('libraryKind', 'strength') === 'pilates' ? 'pilates' : 'strength');
+  const kinds = h('div', { class: 'segmented', role: 'group', 'aria-label': '動作種類' });
+  const main = h('main', { class: 'page stack-lg' });
+  const drawKind = () => {
+    const kind = shownKind();
+    const tab = (value, label) => button([label, h('span', { class: 'kind-count' }, String(byKind(value).length))], () => {
+      if (value === kind) return;
+      store.setMeta('libraryKind', value);
+      drawKind();
+      document.getElementById('app')?.scrollTo({ top: 0 });
+    }, 'chip-btn', { 'aria-pressed': value === kind ? 'true' : 'false' });
+    kinds.replaceChildren(tab('strength', '重訓'), tab('pilates', '皮拉提斯'));
+    main.replaceChildren(kind === 'pilates' ? pilatesSection() : strengthSection());
+  };
+  drawKind();
   return h('div', { class: 'screen has-tabs' },
     h('header', { class: 'topbar page-title library-bar' },
       h('h1', {}, '動作庫'),
       h('div', { class: 'topbar-actions' },
         button('匯入講義', importHandoutSheet, 'ghost'),
         button('批次匯入', importSheet, 'ghost'),
-        button('＋ 新增動作', () => addExerciseSheet('strength', '', null, () => refreshView()), 'primary'))),
-    h('main', { class: 'page stack-lg' }, pilatesSection(), strengthSection()),
+        button('＋ 新增動作', () => addExerciseSheet(shownKind(), '', null, () => refreshView()), 'primary'))),
+    h('div', { class: 'library-kinds' }, kinds),
+    main,
     tabBar('library'));
 }

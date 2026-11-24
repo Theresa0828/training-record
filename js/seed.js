@@ -6,7 +6,7 @@ const STRENGTH = [
   ['背', ['滑輪下拉', '引體向上', '輔助引體向上', '坐姿划船', '槓鈴划船', '單臂啞鈴划船', 'TRX 划船', '直臂下拉', '背伸展']],
   ['肩', ['肩推', '啞鈴肩推', '側平舉', '前平舉', '反向飛鳥', '面拉', '肩外旋', '肩內旋']],
   ['手臂', ['二頭彎舉', '錘式彎舉', '三頭下壓', '過頭三頭伸展']],
-  ['核心', ['棒式', '側棒式', '死蟲式', '鳥狗式', '捲腹', '抗旋轉推舉', '農夫走路', '懸吊抬腿']],
+  ['軀幹', ['棒式', '側棒式', '死蟲式', '鳥狗式', '捲腹', '抗旋轉推舉', '農夫走路', '懸吊抬腿']],
 ];
 
 // First suggestions for the 替代動作 menu. The teacher can change them, and swaps made in class are learned.
@@ -59,10 +59,10 @@ const STRENGTH_TAGS = {
   腿推: ['蹲類', '', '雙側', '股四頭肌 臀肌'],
   分腿蹲: ['蹲類', '', '單側', '股四頭肌 臀肌'],
   保加利亞分腿蹲: ['蹲類', '', '單側', '股四頭肌 臀肌'],
-  弓箭步: ['蹲類', '', '雙側', '股四頭肌 臀肌'],
-  後跨弓箭步: ['蹲類', '', '雙側', '臀肌 股四頭肌'],
+  弓箭步: ['蹲類', '', '單側', '股四頭肌 臀肌'],
+  後跨弓箭步: ['蹲類', '', '單側', '臀肌 股四頭肌'],
   登階: ['蹲類', '', '單側', '股四頭肌 臀肌'],
-  側向弓箭步: ['蹲類', '', '雙側', '內收肌 股四頭肌 臀肌'],
+  側向弓箭步: ['蹲類', '', '單側', '內收肌 股四頭肌 臀肌'],
   硬舉: ['硬舉類', '', '雙側', '臀肌 腿後肌 背伸肌'],
   羅馬尼亞硬舉: ['硬舉類', '', '雙側', '腿後肌 臀肌'],
   相撲硬舉: ['硬舉類', '', '雙側', '臀肌 內收肌 腿後肌'],
@@ -126,7 +126,9 @@ const ALIASES = {
   臥推: ['Bench Press'], 滑輪下拉: ['Lat Pulldown'], 坐姿划船: ['Seated Row'], 肩推: ['Shoulder Press'], 側平舉: ['Lateral Raise'], 面拉: ['Face Pull'],
 };
 
-const idOf = new Map(STRENGTH.flatMap(([group, names]) => names.map((name, index) => [name, `seed_${group}_${index}`])));
+// 軀幹 was called 核心 until 2026-11-24. The ids keep the old word, so records made before still point at the same exercise.
+const ID_GROUP = { 軀幹: '核心' };
+const idOf = new Map(STRENGTH.flatMap(([group, names]) => names.map((name, index) => [name, `seed_${ID_GROUP[group] || group}_${index}`])));
 
 const ALL_SEEDS = STRENGTH.flatMap(([group, names]) => names.map((name) => ({
   id: idOf.get(name),
