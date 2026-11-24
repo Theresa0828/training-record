@@ -15,7 +15,7 @@ import { trendChart, volumeChart } from './trend.js';
 import { photoSheet, rowMediaStrip } from './photos.js';
 import { termRing, calendarPage, sparkline, painBars, learnedTile, qualityDots } from './charts.js';
 import { bodyMap } from './bodymap.js';
-import { assessmentSheet, editAssessment, latestSummary } from './assess.js';
+import { assessmentSheet, editAssessment, latestSummary, problemFigure, problemLegend, lifeNeeds } from './assess.js';
 import { sessionTable, sessionFacts, sessionTitle } from './history.js';
 
 function shortDate(key) {
@@ -24,6 +24,8 @@ function shortDate(key) {
 
 // Every field saves as it is typed (2026-11-23: the save button sat at the bottom and was easy to miss).
 // A blank name or an unreadable birthday is not stored; the old one stays and the line under the field says why.
+// The page reads as one line of thought (2026-11-24): daily life and sport → the body (pain, limits, movement
+// problems, on one figure) → the training goal, which shows what it rests on while it is written.
 function editProfileSheet(student) {
   let changed = false;
   openSheet('學生資料', (close) => {
@@ -33,19 +35,34 @@ function editProfileSheet(student) {
       store.save('students', { ...current(), ...fields, isNew: false });
       changed = true;
       status.textContent = '已自動儲存';
+      drawBasis();
     };
     const hint = () => h('p', { class: 'muted small field-hint', role: 'status' });
-    const name = h('input', { class: 'input', value: student.name, 'aria-label': '姓名' });
+    // One labelled field: the name says where it goes, the small line says what belongs there.
+    const field = (label, help, control, ...rest) => h('label', { class: 'pf-field' },
+      h('span', { class: 'pf-label' }, label), help && h('span', { class: 'muted small' }, help), control, ...rest);
+    const textArea = (key, placeholder, extra = {}) => {
+      const el = h('textarea', { class: 'input', placeholder, ...extra });
+      el.value = student[key] || '';
+      el.addEventListener('input', () => saveFields({ [key]: el.value }));
+      return el;
+    };
+    const textInput = (key, placeholder) => {
+      const el = h('input', { class: 'input', value: student[key] || '', placeholder, maxlength: 40 });
+      el.addEventListener('input', () => saveFields({ [key]: el.value.trim() }));
+      return el;
+    };
+
+    // Basic details: rarely changed, so they sit together in one compact row.
+    const name = h('input', { class: 'input', value: student.name });
     const nameHint = hint();
     name.addEventListener('input', () => {
       const value = name.value.trim();
       nameHint.textContent = value ? '' : '姓名不可空白，先保留原本的姓名';
       if (value) saveFields({ name: value });
     });
-    const aliases = h('input', { class: 'input', value: (student.aliases || []).join('、'), 'aria-label': '日曆上的其他寫法' });
-    aliases.addEventListener('input', () => saveFields({ aliases: aliases.value.split(/[、,，]/).map((a) => a.trim()).filter(Boolean) }));
     // Only needed when two students share a name: the calendar title then reads 王小明 0828 (2026-11-12).
-    const birthday = h('input', { class: 'input', value: student.birthday || '', inputmode: 'numeric', maxlength: 4, placeholder: '例：0828', 'aria-label': '生日，月日 4 碼' });
+    const birthday = h('input', { class: 'input', value: student.birthday || '', inputmode: 'numeric', maxlength: 4, placeholder: '例：0828' });
     const birthdayHint = hint();
     birthday.addEventListener('input', () => {
       const typed = birthday.value.trim();
@@ -55,31 +72,19 @@ function editProfileSheet(student) {
         saveFields({ birthday: day });
       } else birthdayHint.textContent = typed.length < 4 ? '' : '生日請寫月日 4 碼，例如 0828';
     });
-    const goal = h('textarea', { class: 'input', 'aria-label': '訓練目標' });
-    goal.value = student.goal || '';
-    goal.addEventListener('input', () => saveFields({ goal: goal.value }));
-    // The goal is written with the latest problem summary in view, so the two stay matched (2026-11-23).
-    const summary = latestSummary(current());
-    const summaryNote = h('div', { class: 'profile-link' },
-      summary
-        ? [h('span', { class: 'muted small' }, `最新問題總結（${summary.date} 評估）`), h('span', {}, summary.text)]
-        : h('span', { class: 'muted small' }, '還沒有問題總結。評估後寫在「動作問題」，會顯示在這裡對照目標。'),
-      button(summary ? '打開動作問題' : '新增評估', () => {
-        close();
-        if (summary) assessmentSheet(current());
-        else editAssessment(current());
-      }, 'ghost'));
-    const contra = h('textarea', { class: 'input', 'aria-label': '疼痛與禁忌' });
-    contra.value = student.contraindications || '';
-    contra.addEventListener('input', () => saveFields({ contraindications: contra.value }));
-    const painButton = h('button', { type: 'button', class: 'btn list-item pain-pick' });
-    const paintPain = () => {
-      const pain = current().pain;
-      const marked = painList(pain || {}).length > 0;
-      painButton.classList.toggle('is-marked', marked);
-      painButton.replaceChildren(icon('people'), h('span', {}, marked ? `人體圖：${painText(pain)}` : '在人體圖標出疼痛部位'));
-    };
-    painButton.addEventListener('click', () => openPainSheet('學生資料：疼痛部位', {
+    const aliases = h('input', { class: 'input', value: (student.aliases || []).join('、'), placeholder: '用、分開' });
+    aliases.addEventListener('input', () => saveFields({ aliases: aliases.value.split(/[、,，]/).map((a) => a.trim()).filter(Boolean) }));
+
+    // ① Daily life (2026-11-24).
+    const job = textInput('job', '例如：久坐辦公、護理師、退休');
+    const sports = textInput('sports', '例如：每週爬山、羽球');
+    const daily = textArea('dailyNeeds', '例如：抱孫子、爬三樓、提菜籃、蹲下拿東西');
+
+    // ② The body: one figure with the pain and the movement problems, the limits beside it.
+    const contra = textArea('contraindications', '例如：左膝術後，避免屈膝超過 90 度');
+    const figure = h('div', { class: 'pf-figure' });
+    const problems = h('div', { class: 'pf-problems' });
+    const openPain = () => openPainSheet('學生資料：疼痛部位', {
       scores: painScores(current().pain),
       partNotes: current().pain?.painPartNotes,
       note: current().pain?.painNote,
@@ -88,26 +93,83 @@ function editProfileSheet(student) {
         const pain = { ...(current().pain || {}) };
         setPainMap(pain, map);
         saveFields({ pain });
-        paintPain();
+        drawBody();
       },
       onPartNotes: (notes) => saveFields({ pain: { ...(current().pain || {}), painPartNotes: notes } }),
       onNote: (value) => saveFields({ pain: { ...(current().pain || {}), painNote: value } }),
-      onDone: paintPain,
-    }));
-    paintPain();
-    const notes = h('textarea', { class: 'input', 'aria-label': '下次要注意的事' });
-    notes.value = student.nextNotes || '';
-    notes.addEventListener('input', () => saveFields({ nextNotes: notes.value }));
+      onDone: drawBody,
+    });
+    const afterAssessment = () => {
+      goal.value = current().goal || '';
+      drawBody();
+      drawBasis();
+    };
+    function drawBody() {
+      const pain = current().pain || {};
+      const latest = latestAssessment(current());
+      const open = (latest?.problems || []).filter((p) => p.status !== 'solved');
+      const painMarked = painList(pain).length > 0;
+      figure.replaceChildren(
+        button(problemFigure(open, Object.fromEntries(Object.entries(painScores(pain)).filter(([, v]) => v !== null && v !== undefined))), openPain, 'pf-map', { 'aria-label': '在人體圖標疼痛部位' }),
+        problemLegend(),
+        button([icon('people'), h('span', {}, painMarked ? '改疼痛部位' : '標疼痛部位')], openPain, `pain-pick${painMarked ? ' is-marked' : ''}`));
+      problems.replaceChildren(
+        h('div', { class: 'row-between' },
+          h('span', { class: 'pf-label' }, '動作問題'),
+          latest && h('span', { class: 'muted small' }, `${shortDate(latest.date)} 評估・${problemCountText(latest) || '沒有問題'}`)),
+        latest
+          ? h('div', { class: 'stack-sm' },
+            open.length > 0 && h('ul', { class: 'pf-problem-list' }, open.slice(0, 4).map((p) => h('li', {}, problemText(p)))),
+            open.length > 4 && h('span', { class: 'muted small' }, `還有 ${open.length - 4} 個`),
+            latest.summary?.trim() && h('p', { class: 'pf-summary' }, h('span', { class: 'muted small' }, '問題總結（給學生看）'), h('span', {}, latest.summary.trim())))
+          : h('p', { class: 'muted' }, '還沒評估。評估後記下動作問題，會畫在左邊的人體圖上。'),
+        h('div', { class: 'row-wrap' },
+          button(latest ? '新增評估' : '新增第一次評估', () => editAssessment(current(), null, afterAssessment), ''),
+          latest && button([icon('pencil'), h('span', {}, `修改 ${shortDate(latest.date)} 評估`)], () => editAssessment(current(), latest.id, afterAssessment), 'ghost')));
+    }
+
+    // ③ The goal, with what it rests on in view (kept current as the fields above change).
+    const goal = textArea('goal', '例如：三個月內可以無痛爬三樓', { class: 'input pf-goal' });
+    const basis = h('dl', { class: 'pf-basis' });
+    function drawBasis() {
+      const s = current();
+      const life = lifeNeeds(s);
+      const body = [painList(s.pain || {}).length && painText(s.pain), s.contraindications?.trim()].filter(Boolean).join('・');
+      const summary = latestSummary(s);
+      const latest = latestAssessment(s);
+      const named = (latest?.problems || []).filter((p) => p.status !== 'solved').map((p) => p.text).join('、');
+      const row = (label, text) => [h('dt', {}, label), h('dd', { class: text ? '' : 'muted' }, text || '還沒寫')];
+      basis.replaceChildren(...row('① 日常需求', life), ...row('② 疼痛與禁忌', body), ...row('② 動作問題', summary?.text || named));
+    }
+
+    const nextNotes = textArea('nextNotes', '例如：先確認左膝角度再加重');
+    drawBody();
+    drawBasis();
+
     const others = store.all('students').filter((s) => s.id !== student.id);
     const hasRecords = store.all('sessions').some((s) => s.studentId === student.id);
-    return h('div', { class: 'stack' },
+    const step = (no, title, help, ...body) => h('section', { class: 'pf-step' },
+      h('span', { class: 'pf-no', 'aria-hidden': 'true' }, no),
+      h('div', { class: 'pf-step-body' }, h('h3', { class: 'pf-title' }, title), help && h('p', { class: 'muted small' }, help), ...body));
+    return h('div', { class: 'stack-lg profile-form' },
       status,
-      h('div', { class: 'stepper-label' }, '姓名'), name, nameHint,
-      h('div', { class: 'stepper-label' }, '生日（月日 4 碼，同名同姓時才需要，和日曆上寫的一樣）'), birthday, birthdayHint,
-      h('div', { class: 'stepper-label' }, '日曆上的其他寫法（用、分開）'), aliases,
-      h('div', { class: 'stepper-label' }, '訓練目標'), goal, summaryNote,
-      h('div', { class: 'stepper-label' }, '疼痛與禁忌'), contra, painButton,
-      h('div', { class: 'stepper-label' }, '下次要注意的事'), notes,
+      h('section', { class: 'pf-basic' },
+        field('姓名', null, name, nameHint),
+        field('生日（同名同姓才填）', null, birthday, birthdayHint),
+        field('日曆上的其他寫法', null, aliases)),
+      h('div', { class: 'pf-flow' },
+        step('1', '生活與運動', '訓練目標要回應的日常需求',
+          h('div', { class: 'pf-pair' }, field('職業', null, job), field('運動', null, sports)),
+          field('日常動作需求', '想做到、或現在做不好的日常動作', daily)),
+        step('2', '身體狀況', '疼痛、禁忌和動作問題畫在同一個人體圖上',
+          h('div', { class: 'pf-body' }, figure,
+            h('div', { class: 'stack' },
+              field('疼痛與禁忌', '哪裡痛、哪些動作不能做', contra),
+              problems))),
+        step('3', '訓練目標', '根據上面 1、2 寫下想達成的事',
+          basis,
+          field('訓練目標', null, goal))),
+      h('section', { class: 'pf-next' }, field('下次要注意', '只給下一堂課的提醒，上完課可以改', nextNotes)),
       button('完成', close, 'big primary'),
       !hasRecords && others.length > 0 && h('div', { class: 'stack' },
         h('div', { class: 'stepper-label' }, '這其實是舊學生的另一個寫法？點選合併：'),
@@ -143,7 +205,7 @@ function editProfileSheet(student) {
             toast(`已刪除 ${student.name} 的所有紀錄`);
           },
         ), 'ghost danger-text')));
-  }, { onClose: () => { if (changed) refreshView(); } });
+  }, { wide: true, onClose: () => { if (changed) refreshView(); } });
 }
 
 // Each past class can be opened again and changed (2026-11-16). The change is stored and sent only with 存檔上傳,

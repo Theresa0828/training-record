@@ -25,7 +25,7 @@ export function painUnderlay(student) {
   return Object.fromEntries(Object.entries(painScores(student.pain)).filter(([, score]) => score !== null && score !== undefined));
 }
 
-function legend() {
+export function problemLegend() {
   return h('div', { class: 'body-legend', 'aria-hidden': 'true' },
     h('span', {}, h('i', {}), '動作問題'),
     h('span', {}, h('i', { class: 'is-pain' }), '疼痛（數字是分數）'));
@@ -56,7 +56,7 @@ function partsSheet(problem, pain, onChange) {
     });
     map.el.classList.add('is-problem');
     draw();
-    return h('div', { class: 'stack' }, legend(), map.el, picked, button('完成', close, 'big primary'));
+    return h('div', { class: 'stack' }, problemLegend(), map.el, picked, button('完成', close, 'big primary'));
   });
 }
 
@@ -84,6 +84,12 @@ function ownProblemsSheet(onChange) {
     draw();
     return h('div', { class: 'stack' }, h('p', { class: 'muted' }, '移除只是不再列在常用裡，已經寫進評估的問題不會變。'), body, button('完成', close, 'big primary'));
   });
+}
+
+/** Daily needs, job and sport from the profile in one line, or '' when none is written. */
+export function lifeNeeds(student) {
+  return [student?.dailyNeeds, student?.job && `職業：${student.job}`, student?.sports && `運動：${student.sports}`]
+    .filter((x) => x?.trim()).join('・');
 }
 
 /** Opens one assessment, new (id null) or saved, for writing. Nothing is stored until something changes. */
@@ -178,6 +184,8 @@ export function editAssessment(student, assessmentId = null, onDone = null) {
       h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '新增問題'), quick,
         h('div', { class: 'problem-add' }, typed, button('加入', () => { addProblem(typed.value); typed.value = ''; }, ''))),
       h('div', { class: 'summary-goal' },
+        // The student's daily needs from the profile, so the summary and goal answer them (2026-11-24).
+        lifeNeeds(current()) && h('p', { class: 'sg-life' }, h('span', { class: 'muted small' }, '日常需求'), h('span', {}, lifeNeeds(current()))),
         h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '問題總結（給學生看）'), summary),
         h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '訓練目標（和總結對得上嗎？）'), goal)),
       saved && holdButton('刪除這次評估', () => {
@@ -206,7 +214,7 @@ export function assessmentSheet(student) {
           button([icon('pencil'), h('span', {}, '修改')], () => reopen(latest.id), '')),
         latest.summary && h('p', { class: 'contra' }, latest.summary),
         // Solved problems stay listed below but leave the figure, so the map shows only what is still there.
-        latest.problems.some((p) => p.status !== 'solved' && p.parts?.length) && h('div', { class: 'problem-map' }, problemFigure(latest.problems.filter((p) => p.status !== 'solved'), pain), legend()),
+        latest.problems.some((p) => p.status !== 'solved' && p.parts?.length) && h('div', { class: 'problem-map' }, problemFigure(latest.problems.filter((p) => p.status !== 'solved'), pain), problemLegend()),
         latest.problems.map((problem) => h('div', { class: 'row-between option-row' },
           h('span', {}, problemText(problem)),
           h('span', { class: `problem-status is-${problem.status || 'open'}` }, STATUS_LABEL[problem.status || 'open'])))),

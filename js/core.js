@@ -502,7 +502,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v31';
+export const APP_VERSION = 'v32';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -1310,6 +1310,12 @@ export function assessmentsByDate(student) {
 
 export function latestAssessment(student) {
   return assessmentsByDate(student)[0] || null;
+}
+
+/** The summary the student sees on a class's report: the newest one written on or before that class (2026-11-24). */
+export function summaryForDate(student, date) {
+  const found = assessmentsByDate(student).find((a) => (a.date || '') <= (date || '9999') && a.summary?.trim());
+  return found ? { date: found.date, text: found.summary.trim() } : null;
 }
 
 /** A new assessment starts from the last one: every problem not yet solved comes along with its status, to be checked again. */

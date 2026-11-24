@@ -5,7 +5,7 @@ import { h, holdButton, back, openSheet } from './dom.js';
 import * as store from './store.js';
 import {
   dateKey, doneSessions, nextClassInfo, learnedSummary, exerciseTrend, layRegion,
-  reportRows, reportRegions, reportPain, effortLevel, BAND_COLORS,
+  reportRows, reportRegions, reportPain, effortLevel, BAND_COLORS, summaryForDate,
 } from './core.js';
 import { termRing, calendarPage } from './charts.js';
 import { bodyMap } from './bodymap.js';
@@ -45,12 +45,53 @@ function goalCard(student) {
     h('p', { class: student.goal ? 'rp-say' : 'rp-note' }, student.goal || '下次和老師一起訂')));
 }
 
+/** 20 when the whole text fits, else 16 for all of it (as on the overview, L-8). */
+function fitSay(el) {
+  requestAnimationFrame(() => {
+    if (el.isConnected && el.scrollHeight > el.clientHeight + 1) el.classList.add('is-small');
+  });
+  return el;
+}
+
+/** The teacher's summary for the student, read as the reason for the goal beside it (2026-11-24). */
+function whyCard(student, summary) {
+  return card('span-4 rp-why', null,
+    h('div', { class: 'rp-why-part' }, h('h3', {}, '老師的觀察'), fitSay(h('p', { class: 'rp-say rp-fit' }, summary.text))),
+    h('span', { class: 'rp-why-arrow', 'aria-hidden': 'true' }, icon('next')),
+    h('div', { class: 'rp-why-part' }, h('h3', {}, '所以我們的目標'),
+      student.goal ? fitSay(h('p', { class: 'rp-say rp-fit' }, student.goal)) : h('p', { class: 'rp-note' }, '下次和老師一起訂')));
+}
+
 function termCard(session) {
   if (!session.classNo) return card('span-2', '這一期上到第幾堂', h('p', { class: 'rp-note' }, '老師還沒設定'));
   const left = Math.max(0, session.packageSize - session.classNo);
   return card('span-2', '這一期上到第幾堂', h('div', { class: 'rp-side' },
     termRing(session.classNo, session.packageSize, false),
     h('div', {}, h('p', { class: 'rp-big' }, `第 ${session.classNo} 堂`), h('p', { class: 'rp-say' }, left ? `還有 ${left} 堂` : '這期最後一堂'))));
+}
+
+function nextTime(info) {
+  if (!info.time) return '';
+  const [hour, minute] = info.time.split(':').map(Number);
+  return `${hour >= 12 ? '下午' : '上午'} ${hour > 12 ? hour - 12 : hour}:${String(minute).padStart(2, '0')}`;
+}
+
+/** The class count and the next class in one card, when the summary takes the room of the first row. */
+function termNextCard(session, student) {
+  const info = nextClassInfo(student, store.all('events'), dateKey(), store.all('students'));
+  const left = session.classNo ? Math.max(0, session.packageSize - session.classNo) : 0;
+  const time = nextTime(info);
+  const week = info.date ? `星期${WEEK[new Date(`${info.date}T00:00`).getDay()]}` : '';
+  return card('span-2 rp-term-next', null,
+    session.classNo
+      ? h('div', { class: 'rp-side' }, termRing(session.classNo, session.packageSize, false),
+        h('div', {}, h('p', { class: 'rp-big' }, `第 ${session.classNo} 堂`), h('p', { class: 'rp-note' }, left ? `這一期還有 ${left} 堂` : '這期最後一堂')))
+      : h('p', { class: 'rp-note' }, '第幾堂：老師還沒設定'),
+    h('div', { class: 'rp-side' }, calendarPage(info.date || ''),
+      h('div', {}, h('p', { class: 'rp-note' }, info.date ? `下次上課・${week}` : '下次上課'),
+        info.date
+          ? h('p', { class: 'rp-big' }, time || '時間再確認')
+          : h('p', { class: 'rp-big' }, '和老師約時間'))));
 }
 
 function nextCard(student) {
@@ -198,14 +239,14 @@ export function reportView({ studentId, sessionId }) {
   const history = doneSessions(store.all('sessions'), studentId).filter((s) => s.id !== session.id && (s.date + (s.finishedAt || 0)) <= (session.date + (session.finishedAt || Number.MAX_SAFE_INTEGER)));
   const rows = reportRows(session, history, (id) => store.get('exercises', id));
   const trend = trendCard(session, history);
+  const summary = summaryForDate(student, session.date);
   return h('div', { class: 'screen report' },
     h('header', { class: 'topbar rp-top' },
       h('div', { class: 'rp-title' }, h('h1', {}, student.name), h('p', {}, longDate(session.date))),
       leave),
     h('main', { class: 'page bento rp-grid' },
-      goalCard(student),
-      termCard(session),
-      nextCard(student),
+      // With a summary the first row reads "what the teacher saw → so our goal"; the class count and next class share a card.
+      ...(summary ? [whyCard(student, summary), termNextCard(session, student)] : [goalCard(student), termCard(session), nextCard(student)]),
       rows.length ? exercisesCard(rows) : card('span-6', '今天做的動作', h('p', { class: 'rp-note' }, '做完第一組就會出現在這裡。')),
       painCard(session, history),
       trend,

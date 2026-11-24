@@ -919,6 +919,21 @@ button.stat-card:active { transform: scale(.985); }
 .rp-side { display: flex; align-items: center; gap: 14px; }
 .rp-side .term-ring { width: 76px; height: 76px; }
 .rp-side .cal-page { height: 80px; width: 72px; }
+/* The teacher's summary and the goal side by side, an arrow between them: the summary is why the goal is what it is (2026-11-24). */
+.rp-why { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: start; gap: 6px 10px; }
+.rp-why-part { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.rp-why-arrow { align-self: center; color: var(--muted); display: grid; place-items: center; }
+.rp-why-arrow svg { width: 22px; height: 22px; }
+.rp-fit { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.rp-fit.is-small { font-size: 16px; -webkit-line-clamp: 5; }
+.rp-term-next { gap: 10px; align-content: center; }
+.rp-term-next .rp-side { gap: 12px; }
+.rp-term-next .rp-side > div { display: grid; gap: 2px; }
+.rp-term-next .term-ring { width: 52px; height: 52px; flex: none; }
+.rp-term-next .cal-page { width: 56px; height: 60px; }
+.rp-term-next .cal-day { font-size: 20px; }
+.rp-term-next .cal-week { display: none; }
+.rp-term-next .rp-big { font-size: 20px; }
 .rp-goal .rp-say { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .rp-empty { padding: 40px 20px; font-size: 20px; text-align: center; color: var(--muted); }
 .rp-ex { gap: 0; padding-bottom: 10px; }
@@ -1155,3 +1170,37 @@ video.photo-img { object-fit: contain; background: #020300; }
 .problem-card-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .problem-map { display: grid; gap: 6px; justify-items: center; }
 .problem-map .body-map { width: min(100%, 360px); }
+
+/* Student profile (2026-11-24): bigger names on every field, and the important part laid out as one line of thought:
+   1 daily life → 2 the body (pain, limits and movement problems on one figure) → 3 the goal, with what it rests on. */
+.pf-field { display: grid; gap: 4px; min-width: 0; align-content: start; }
+.pf-label { font-size: 16px; font-weight: 500; color: var(--fg); }
+.pf-title { margin: 0; font-size: 20px; font-weight: 700; line-height: 32px; }
+.pf-basic { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; padding: 14px; border-radius: 18px; background: var(--soft); }
+.pf-flow { display: grid; }
+.pf-step { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 0 12px; padding-bottom: 28px; }
+.pf-step:last-child { padding-bottom: 0; }
+.pf-step::before { content: ""; position: absolute; left: 15px; top: 36px; bottom: 4px; width: 2px; border-radius: 1px; background: var(--line-strong); }
+.pf-step:last-child::before { display: none; }
+.pf-no { width: 32px; height: 32px; border-radius: 50%; background: var(--fg); color: var(--surface); display: grid; place-items: center; font-size: 16px; font-weight: 700; }
+.pf-step-body { display: grid; gap: 12px; min-width: 0; }
+.pf-step-body > .muted.small { margin-top: -10px; }
+.pf-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.pf-body { display: grid; grid-template-columns: minmax(170px, 220px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.pf-figure { display: grid; gap: 8px; }
+.btn.pf-map { display: block; width: 100%; min-height: 0; padding: 8px; border-radius: 16px; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--line); }
+.pf-map .body-map { width: 100%; }
+.pf-problems { display: grid; gap: 8px; padding: 12px 14px; border-radius: 16px; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--line); }
+.pf-problem-list { margin: 0; padding-left: 1.2em; display: grid; gap: 2px; }
+.pf-summary { display: grid; gap: 2px; margin: 0; padding: 8px 10px; border-radius: 12px; background: var(--soft); }
+.pf-basis { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 0; padding: 12px 14px; border-radius: 16px; background: var(--soft); }
+.pf-basis dt { font-size: 13px; color: var(--muted); line-height: 24px; white-space: nowrap; }
+.pf-basis dd { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.input.pf-goal { font-size: 20px; min-height: 120px; }
+.pf-next { padding-top: 20px; border-top: 1px solid var(--line); }
+@media (max-width: 560px) {
+  .pf-body { grid-template-columns: minmax(0, 1fr); }
+  .pf-figure { max-width: 260px; }
+}
+.summary-goal .sg-life { grid-column: 1 / -1; display: grid; gap: 2px; margin: 0; }
+.pf-figure .pain-pick { display: flex; justify-content: center; align-items: center; gap: 8px; }
