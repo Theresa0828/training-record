@@ -3,6 +3,7 @@ import { h, button, tabBar, confirmSheet, openSheet, refreshView, toast } from '
 import * as store from './store.js';
 import { icon } from './icons.js';
 import { call, currentStatus, isConnected, parsePairingCode, photosWaitingForScript, syncNow } from './sync.js';
+import { recordStatus, recordStatusText } from './fullrecord.js';
 import { signaturePad } from './record.js';
 import { loadDemo, clearDemo } from './demo.js';
 
@@ -71,10 +72,12 @@ function connectSection() {
     connected ? [
       h('p', {}, `已連線，老師姓名：${conn.teacher || '未設定'}`),
       h('div', { class: `status${currentStatus().state === 'error' ? ' warn' : ''}`, 'data-sync-status': true }, currentStatus().message),
-      photosWaitingForScript() > 0 && scriptUpdateHelp(),
+      h('p', { class: `status${recordStatus().problem ? ' warn' : ''}`, 'data-record-status': true }, recordStatusText()),
+      (photosWaitingForScript() > 0 || recordStatus().scriptOld) && scriptUpdateHelp(),
       h('div', { class: 'row-wrap' },
         button('立即同步', () => syncNow(), 'primary'),
         button('選擇日曆', loadCalendars, ''),
+        /^https:\/\/drive\.google\.com\//.test(recordStatus().folderUrl) && button('打開完整紀錄', () => window.open(recordStatus().folderUrl, '_blank', 'noopener'), ''),
         button('中斷連線', () => confirmSheet('中斷連線', '這台裝置將不再同步。紀錄仍會留在這台裝置和 Google 雲端。', '中斷連線', () => {
           store.setMeta('connection', null);
           refreshView();
@@ -100,16 +103,16 @@ function connectSection() {
     calendars);
 }
 
-/** Shown while photos wait on the iPad because the Apps Script is older than photos (2026-11-23). */
+/** Shown while photos or full-record PDFs wait because the Apps Script is older than them (2026-11-23, 2026-11-25). */
 function scriptUpdateHelp() {
   return h('details', { class: 'script-help' },
-    h('summary', {}, '照片影片要怎麼傳到雲端'),
+    h('summary', {}, '要怎麼更新雲端連線程式'),
     h('div', { class: 'stack-sm' },
-      h('p', {}, '紀錄已經正常上傳。照片影片要在電腦把雲端連線程式更新一次，只做一次：'),
+      h('p', {}, '紀錄已經正常上傳。照片影片和完整紀錄 PDF 要在電腦把雲端連線程式更新一次，只做一次：'),
       h('ol', {},
         h('li', {}, '電腦打開 script.google.com 裡的連線程式，把新版程式整份貼上，按儲存。'),
         h('li', {}, '「部署」→「管理部署作業」→ 鉛筆 →「版本」選「新版本」→「部署」。不要按「新增部署作業」。'),
-        h('li', {}, '回到這裡按「立即同步」，照片影片會自動補傳。')),
+        h('li', {}, '回到這裡按「立即同步」，照片影片和完整紀錄 PDF 會自動補上。')),
       h('p', { class: 'muted small' }, '網址和配對碼都不變，iPad 不用重新配對。更新程式不會動到 iPad 上和雲端裡的學生紀錄；雲端資料一律以比較新的那份為準，不會被舊資料蓋掉。')));
 }
 

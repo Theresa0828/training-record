@@ -1,6 +1,7 @@
 import { go, registerView, installTapGuard, installKeyboardLift, refreshView, currentView, toast } from './dom.js';
 import * as store from './store.js';
 import { startAutoSync, onStatus, onCalendarChange } from './sync.js';
+import { startFullRecords, onRecordStatus, recordStatusText } from './fullrecord.js';
 import { dateKey, legacySpine } from './core.js';
 import { todayView } from './today.js';
 import { recordView, settleOldDrafts } from './record.js';
@@ -73,6 +74,14 @@ async function boot() {
     if (document.querySelector('#sheet-root .sheet-overlay')) return;
     refreshView();
   });
+  // Full-record PDFs (2026-11-25) follow each sync round; the settings line follows their progress.
+  onRecordStatus((s) => {
+    for (const el of document.querySelectorAll('[data-record-status]')) {
+      el.textContent = recordStatusText(s);
+      el.classList.toggle('warn', !!s.problem);
+    }
+  });
+  startFullRecords();
   startAutoSync();
 
   if ('serviceWorker' in navigator && window.isSecureContext) {
