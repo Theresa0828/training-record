@@ -118,30 +118,30 @@ function finder(kind, items, filters, onChange, renderList) {
     active && (matches.length ? renderList(matches) : h('p', { class: 'muted' }, '沒有符合的動作，少選一個條件試試。')));
 }
 
-/** Adds one exercise without leaving the class or the plan. */
+/** Adds one exercise without leaving the class or the plan. Same rows as editing (docs/設計規範.md B-23). */
 function addExerciseSheet(kind, name, group, onAdded) {
   openSheet('新增動作', (close) => {
-    const input = h('input', { class: 'input', value: name || '', maxlength: 40, placeholder: '動作名稱', 'aria-label': '動作名稱' });
-    const choice = kind === 'strength' ? groupPicker(group && group !== '其他' ? [group] : []) : null;
-    const tagChoice = kind === 'strength' ? strengthTagEditor(null) : null;
-    let chosen = group || '其他';
-    const groups = h('div', { class: 'chips' });
-    const drawGroups = () => groups.replaceChildren(...[...new Set([...groupsOf(byKind(kind), kind), '其他'])].map((option) => button(option, () => { chosen = option; drawGroups(); }, 'chip-btn', { 'aria-pressed': option === chosen ? 'true' : 'false' })));
-    if (!choice) drawGroups();
-    return h('div', { class: 'stack' }, input,
-      choice ? choice.el : h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '器材'), groups),
-      tagChoice?.el,
+    const strength = kind === 'strength';
+    const input = h('input', { class: 'input', value: name || '', maxlength: 40, placeholder: strength ? '例如：高腳杯深蹲' : '例如：Footwork', 'aria-label': '動作名稱' });
+    const parts = strength ? groupPicker(group && group !== '其他' ? [group] : []) : null;
+    const apparatus = strength ? null : apparatusPicker(group);
+    const tags = strength ? strengthTagEditor(null) : tagEditor({});
+    return h('div', { class: 'stack' },
+      nameRow(input),
+      tagHint(kind),
+      (parts || apparatus).el,
+      tags.el,
       button('加入', () => {
         const clean = input.value.trim();
         if (!clean) { toast('名稱不可空白'); return; }
         const same = byKind(kind).find((item) => item.name === clean);
-        const fresh = { id: newId('ex'), name: clean, kind, group: chosen };
-        const tags = tagChoice?.value();
-        const exercise = same || (choice ? withGroups({ ...fresh, ...(tags ? { tags, tagsEdited: true } : {}) }, choice.value()) : fresh);
+        const value = tags.value();
+        const fresh = { id: newId('ex'), name: clean, kind, group: apparatus ? apparatus.value() : group || '其他', ...(value ? { tags: value, tagsEdited: true } : {}) };
+        const exercise = same || (parts ? withGroups(fresh, parts.value()) : fresh);
         if (!same) store.save('exercises', exercise);
         close();
         onAdded(exercise);
-      }, 'big primary'));
+      }, 'big primary pinned'));
   });
 }
 
@@ -163,7 +163,7 @@ function groupPicker(initial) {
   }));
   draw();
   return {
-    el: h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '部位（可以複選，第一個點的是主要部位）'), chips),
+    el: sheetRow('部位', chips),
     value: () => chosen,
   };
 }
@@ -302,38 +302,117 @@ export function exercisePicker(defaultKind, onPick, { current = null } = {}) {
   return h('div', { class: 'stack' }, tabs, search, results);
 }
 
+/** One line of the add and edit sheets: the label in a fixed column, the chips beside it (B-21, B-23). */
+function sheetRow(label, chips) {
+  return h('div', { class: 'finder-row tag-row', role: 'group', 'aria-label': label }, h('span', { class: 'finder-label' }, label), chips);
+}
+
+/** The name box, its label in the same column as the rows below it. */
+function nameRow(input) {
+  return h('label', { class: 'tag-row' }, h('span', { class: 'finder-label' }, '名稱'), input);
+}
+
+/** One line above the rows instead of a hint on each, so every row label is the same size. */
+function tagHint(kind) {
+  return h('p', { class: 'stepper-label' }, kind === 'pilates'
+    ? '分類是找動作和建議退階、進階用，可以之後再補。'
+    : '部位和類別可以複選，第一個點的是主要的。分類是找動作、算學習程度用，可以之後再補。');
+}
+
+/** The apparatus of a Pilates exercise. Editing uses the same chips as adding, so a typo can't make a new apparatus. */
+function apparatusPicker(initial) {
+  let chosen = initial || '其他';
+  const chips = h('div', { class: 'chips' });
+  const draw = () => chips.replaceChildren(...[...new Set([...groupsOf(byKind('pilates'), 'pilates'), chosen, '其他'])].map((option) => button(option, () => {
+    chosen = option;
+    draw();
+  }, 'chip-btn', { 'aria-pressed': option === chosen ? 'true' : 'false' })));
+  draw();
+  return { el: sheetRow('器材', chips), value: () => chosen };
+}
+
+/** Muscles the teacher added herself, kept as options like 道具 and 備註標籤, so they can be taken off the list again. */
+function ownMuscles() {
+  return store.all('options').filter((o) => o.type === 'muscle' && !o.deleted);
+}
+
+/**
+ * Main muscles, tapped like the other rows (2026-11-24). Strength and Pilates share the list, because the handouts
+ * use the same words. 「＋ 新增」 adds a missing one for every exercise; it can be removed there, with undo.
+ * A muscle this exercise already has always shows, even after it is removed from the list.
+ */
+function musclePicker(initial) {
+  let chosen = Array.isArray(initial) ? initial.filter((m) => typeof m === 'string' && m.trim()) : [];
+  const chips = h('div', { class: 'chips' });
+  const toggle = (value) => {
+    if (!chosen.includes(value) && chosen.length >= 6) { toast('主要肌群最多 6 個'); return; }
+    chosen = chosen.includes(value) ? chosen.filter((m) => m !== value) : [...chosen, value];
+    draw();
+  };
+  const addOwn = () => openSheet('新增肌群', (close) => {
+    const input = h('input', { class: 'input', maxlength: 12, placeholder: '例如：腹橫肌', 'aria-label': '肌群名稱' });
+    const list = h('div', { class: 'stack-sm' });
+    const add = () => {
+      const name = input.value.trim();
+      if (!name) { toast('名稱不可空白'); return; }
+      if (!MUSCLES.includes(name) && !ownMuscles().some((o) => o.name === name)) store.save('options', { id: newId('opt'), type: 'muscle', name });
+      close();
+      if (chosen.includes(name)) draw(); else toggle(name);
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') add(); });
+    const drawList = () => {
+      const own = ownMuscles();
+      list.replaceChildren(...(own.length ? [
+        h('div', { class: 'stepper-label' }, '你新增的肌群（移除只是不再列成按鈕，已經選了它的動作不會變）'),
+        ...own.map((option) => h('div', { class: 'row-between option-row' },
+          h('span', {}, option.name),
+          holdButton('移除', () => {
+            store.save('options', { ...option, deleted: true });
+            drawList();
+            draw();
+            toast(`已移除 ${option.name}`, { label: '復原', run: () => { store.save('options', { ...option, deleted: false }); drawList(); draw(); } });
+          }, 'ghost danger-text'))),
+      ] : []));
+    };
+    drawList();
+    return h('div', { class: 'stack' }, input, button('加入並選取', add, 'big primary'), list);
+  });
+  function draw() {
+    const extra = [...new Set([...ownMuscles().map((o) => o.name), ...chosen])].filter((m) => !MUSCLES.includes(m));
+    chips.replaceChildren(
+      ...[...MUSCLES, ...extra].map((value) => button(value, () => toggle(value), 'chip-btn', { 'aria-pressed': chosen.includes(value) ? 'true' : 'false' })),
+      button('＋ 新增', addOwn, 'chip-btn chip-add', { 'aria-label': '新增肌群' }));
+  }
+  draw();
+  return { el: sheetRow('主要肌群', chips), value: () => chosen };
+}
+
 /**
  * Chips for the strength classification (2026-11-24): 類別 (several, the first tapped is the main one),
  * 方向 for a push or pull, 單雙側 and the main muscles. A hand edit is kept when the built-in list changes.
  */
 function strengthTagEditor(initial) {
-  const tags = { patterns: [...(initial?.patterns || [])], plane: initial?.plane || '', side: initial?.side || '', muscles: [...(initial?.muscles || [])] };
+  const tags = { patterns: [...(initial?.patterns || [])], plane: initial?.plane || '', side: initial?.side || '' };
+  const muscles = musclePicker(initial?.muscles);
   const area = h('div', { class: 'stack-sm' });
   const toggle = (list, value) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
-  const row = (label, chips) => h('div', { class: 'finder-row', role: 'group', 'aria-label': label },
-    h('span', { class: 'finder-label' }, label), h('div', { class: 'chips' }, chips));
+  const row = (label, chips) => sheetRow(label, h('div', { class: 'chips' }, chips));
   const one = (key, values) => values.map((value) => button(value, () => { tags[key] = tags[key] === value ? '' : value; draw(); },
     'chip-btn', { 'aria-pressed': tags[key] === value ? 'true' : 'false' }));
   function draw() {
     const main = tags.patterns.length > 1 ? tags.patterns[0] : '';
-    const muscles = [...MUSCLES, ...tags.muscles.filter((m) => !MUSCLES.includes(m))];
     area.replaceChildren(...[
-      h('div', { class: 'stepper-label' }, '分類（找動作、算學習程度用；類別可以複選，第一個點的是主要類別）'),
       row('類別', STRENGTH_PATTERNS.map((value) => button([value, value === main ? h('small', { class: 'chip-main' }, '主要') : null], () => {
         tags.patterns = toggle(tags.patterns, value);
         draw();
       }, 'chip-btn', { 'aria-pressed': tags.patterns.includes(value) ? 'true' : 'false', 'aria-label': value === main ? `${value}，主要類別` : value }))),
       tags.patterns.some((p) => PLANE_PATTERNS.includes(p)) && row('方向', one('plane', STRENGTH_PLANES)),
       row('單雙側', one('side', STRENGTH_SIDES)),
-      row('主要肌群', muscles.map((value) => button(value, () => {
-        if (!tags.muscles.includes(value) && tags.muscles.length >= 6) { toast('主要肌群最多 6 個'); return; }
-        tags.muscles = toggle(tags.muscles, value);
-        draw();
-      }, 'chip-btn', { 'aria-pressed': tags.muscles.includes(value) ? 'true' : 'false' }))),
+      muscles.el,
     ].filter(Boolean));
   }
   draw();
-  return { el: area, value: () => cleanStrengthTags(tags) };
+  return { el: area, value: () => cleanStrengthTags({ ...tags, muscles: muscles.value() }) };
 }
 
 /** Chips for the Pilates classification. The teacher's changes are kept even when the handout is imported again. */
@@ -341,16 +420,14 @@ function tagEditor(exercise) {
   const tags = { region: '', posture: '', stability: [], mobility: [], focus: [], level: 0, muscles: [], family: '', ...(exercise.tags || {}) };
   for (const key of PILATES_LIST_KEYS) if (!Array.isArray(tags[key])) tags[key] = [];
   const area = h('div', { class: 'stack-sm' });
-  const muscles = h('input', { class: 'input', value: tags.muscles.join('、'), maxlength: 60, placeholder: '例如：臀肌、腹肌', 'aria-label': '主要肌群' });
-  const single = (key, label, values, toValue = (v) => v) => h('div', { class: 'finder-row', role: 'group', 'aria-label': label },
-    h('span', { class: 'finder-label' }, label),
+  const muscles = musclePicker(tags.muscles);
+  const single = (key, label, values, toValue = (v) => v) => sheetRow(label,
     h('div', { class: 'chips' }, values.map((value) => button(value, () => {
       tags[key] = tags[key] === toValue(value) ? (key === 'level' ? 0 : '') : toValue(value);
       draw();
     }, 'chip-btn', { 'aria-pressed': tags[key] === toValue(value) ? 'true' : 'false' }))));
   // Several values each: tap to add, tap again to take away.
-  const many = (key, label, values) => h('div', { class: 'finder-row', role: 'group', 'aria-label': label },
-    h('span', { class: 'finder-label' }, label),
+  const many = (key, label, values) => sheetRow(label,
     h('div', { class: 'chips' }, values.map((value) => button(value, () => {
       tags[key] = tags[key].includes(value) ? tags[key].filter((f) => f !== value) : [...tags[key], value];
       draw();
@@ -363,12 +440,12 @@ function tagEditor(exercise) {
       many('mobility', '活動度', PILATES_MOBILITY),
       many('focus', '重點', PILATES_FOCUS),
       single('level', '程度', PILATES_LEVELS, (v) => PILATES_LEVELS.indexOf(v) + 1),
-      h('label', { class: 'field' }, h('span', { class: 'stepper-label' }, '主要肌群（用、分開）'), muscles));
+      muscles.el);
   }
   draw();
   return {
     el: area,
-    value: () => cleanPilatesTags({ ...tags, muscles: muscles.value.split(/[、,，]/) }),
+    value: () => cleanPilatesTags({ ...tags, muscles: muscles.value() }),
   };
 }
 
@@ -377,15 +454,13 @@ function editSheet(exercise) {
     const name = h('input', { class: 'input', value: exercise.name, 'aria-label': '動作名稱' });
     const strength = exercise.kind !== 'pilates';
     const parts = strength ? groupPicker(exerciseGroups(exercise).filter((g) => g !== '其他')) : null;
-    const group = strength ? null : h('input', { class: 'input', value: exercise.group || '', 'aria-label': '器材' });
-    const tags = exercise.kind === 'pilates' ? tagEditor(exercise) : null;
-    const strengthTags = strength ? strengthTagEditor(exercise.tags) : null;
+    const apparatus = strength ? null : apparatusPicker(exercise.group);
+    const tags = strength ? strengthTagEditor(exercise.tags) : tagEditor(exercise);
     return h('div', { class: 'stack' },
-      h('div', { class: 'stepper-label' }, '動作名稱'), name,
-      parts ? parts.el : [h('div', { class: 'stepper-label' }, '器材'), group],
-      strengthTags?.el,
-      tags && h('div', { class: 'stepper-label' }, '分類（找動作和建議退階、進階用）'),
-      tags?.el,
+      nameRow(name),
+      tagHint(exercise.kind),
+      (parts || apparatus).el,
+      tags.el,
       button(exercise.pinned ? '★ 已設為常用，點一下取消' : '☆ 設為常用', () => {
         store.save('exercises', { ...exercise, pinned: !exercise.pinned });
         close();
@@ -408,16 +483,11 @@ function editSheet(exercise) {
         button('儲存', () => {
           if (!name.value.trim()) { toast('名稱不可空白'); return; }
           const named = { ...exercise, name: name.value.trim() };
-          const next = parts ? withGroups(named, parts.value()) : { ...named, group: group.value.trim() };
-          if (tags) {
-            const value = tags.value();
-            // Compare cleaned tags, so tags saved before a new field existed do not count as a hand edit.
-            if (JSON.stringify(value) !== JSON.stringify(cleanPilatesTags(exercise.tags))) Object.assign(next, { tags: value, tagsEdited: true });
-          }
-          if (strengthTags) {
-            const value = strengthTags.value();
-            if (JSON.stringify(value) !== JSON.stringify(cleanStrengthTags(exercise.tags))) Object.assign(next, { tags: value, tagsEdited: true });
-          }
+          const next = parts ? withGroups(named, parts.value()) : { ...named, group: apparatus.value() };
+          const value = tags.value();
+          // Compare cleaned tags, so tags saved before a new field existed do not count as a hand edit.
+          const before = strength ? cleanStrengthTags(exercise.tags) : cleanPilatesTags(exercise.tags);
+          if (JSON.stringify(value) !== JSON.stringify(before)) Object.assign(next, { tags: value, tagsEdited: true });
           store.save('exercises', next);
           close();
           refreshView();

@@ -135,6 +135,8 @@ h3 { margin: 0; font-size: 16px; font-weight: 500; color: var(--muted); }
 .btn.primary { background: var(--primary); color: var(--on-primary); box-shadow: none; }
 .btn.big { min-height: 72px; font-size: 20px; border-radius: 20px; display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; }
 .btn.pinned { position: sticky; bottom: 0; box-shadow: 0 0 0 6px var(--surface); }
+/* In a sheet the ring matches the sheet, so the long add sheet keeps its one button in view (2026-11-24). */
+.sheet .btn.pinned { box-shadow: 0 0 0 10px var(--bg), 0 24px 0 10px var(--bg); }
 .panel .btn.big { min-height: 64px; }
 .btn.ghost { background: transparent; box-shadow: none; color: var(--primary-text); padding-inline: 10px; }
 .btn.back { display: inline-flex; align-items: center; gap: 2px; padding-inline: 6px 12px; color: var(--fg); }
@@ -785,6 +787,8 @@ button.stat-card:active { transform: scale(.985); }
 /* In the edit sheets the names are 2–3 characters: one width keeps every row of chips starting at the same place. */
 .finder-row > .finder-label { min-width: 3em; }
 .finder-chips { display: flex; flex-wrap: wrap; gap: 8px 16px; min-width: 0; }
+/* Classification chips in the add and edit sheets: labels in one column, so every row starts at the same place (2026-11-24). */
+.tag-row { display: grid; grid-template-columns: 4.5em minmax(0, 1fr); gap: 8px; align-items: start; }
 .chip-group { display: flex; flex-wrap: wrap; gap: 6px; }
 .finder .chip-btn { min-height: 44px; padding-inline: 12px; }
 /* A repeated word written once: 軀幹｜中立 屈曲 伸展 旋轉 */
