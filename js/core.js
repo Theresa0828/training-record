@@ -647,7 +647,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v37';
+export const APP_VERSION = 'v38';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -747,6 +747,14 @@ export function studentsNeedingPlan(events, students, plans, today) {
     if (!plan || plan.used || !plan.rows || !plan.rows.length) result.push({ student, event });
   }
   return result;
+}
+
+/**
+ * The calendar's bookings plus the sample ones (示範資料). Those are in no calendar, so a sync while connected would
+ * otherwise drop them within minutes; they stay until the sample is cleared (2026-11-24).
+ */
+export function keepSampleBookings(bookings, current) {
+  return [...bookings, ...current.filter((e) => e.demo && !bookings.some((b) => b.id === e.id))];
 }
 
 /**
