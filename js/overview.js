@@ -548,7 +548,7 @@ export function overviewView({ studentId }) {
   const hasPlan = plan && !plan.used && plan.rows?.length;
   const today = dateKey();
   const inClass = store.all('sessions').some((s) => s.studentId === studentId && s.date === today && s.status === 'draft');
-  const bookedToday = store.all('events').some((e) => e.date === today && studentForEvent(store.all('students'), e)?.id === student.id);
+  const bookedToday = store.all('events').some((e) => e.date === today && !e.change && studentForEvent(store.all('students'), e)?.id === student.id);
   const todaySession = store.all('sessions').find((s) => s.studentId === studentId && s.date === today && s.classNo);
   const count = todaySession ? { no: todaySession.classNo, size: todaySession.packageSize } : nextClassNumber(history.filter((s) => s.date !== today), student);
   // Whatever this student needs next is the one big button.

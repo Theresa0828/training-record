@@ -97,6 +97,12 @@ export function back(fallback = 'today') {
   paint('back');
 }
 
+/** Replaces the current screen without adding a step back, e.g. switching between the two students of a 1:2 class. */
+export function swap(name, params = {}) {
+  current = { name, params };
+  paint('fade');
+}
+
 /** Returns to the home screen and forgets the path taken to get there. */
 export function home() {
   history.length = 0;

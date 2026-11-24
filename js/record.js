@@ -1,10 +1,11 @@
 // The in-class screen. A tap changes memory, updates only what it touched, and saves in the background.
-import { h, button, holdButton, backButton, back, go, home, openSheet, toast, dismissActionToast } from './dom.js';
+import { h, button, holdButton, backButton, back, go, home, swap, openSheet, toast, dismissActionToast } from './dom.js';
 import { uploadRecord, isWaiting, isConnected } from './sync.js';
 import * as store from './store.js';
 import {
   MAX_SETS, DEFAULT_TAGS, DEFAULT_PROPS, chooserOptions, painList, painText, painShort, setPainMap, setText, rowDetails, exerciseHistory, exerciseTrend, ASSIST_LEVELS, dateKey, newId, makeRow, makeSet,
   doneSessions, startingRows, isBpFlagged, expectedDigits, resolveStaleDraft, swapRow, commonSprings, nextClassNumber, classLabel, moveRow, setLoad, equipmentText, BAND, effortLevel,
+  bookingFrom, partnerFor, pairClassNumber, planForPartner, rowsFromSession,
 } from './core.js';
 import { kindLabel } from './today.js';
 import { exercisePicker, rememberSwaps } from './library.js';
@@ -29,11 +30,34 @@ const STATUS_FLAGS = [['pain', '疼痛'], ['sleep', '睡眠'], ['diet', '飲食'
 const PANEL_TABS = [['set', '重量次數'], ['feel', '感受與備註']];
 const UNDO_LIMIT = 60;
 
-/** The count runs by itself. Classes opened before it did get their number the first time they open. */
+/**
+ * The other student of today's 1:2 class (two names in one calendar title, 2026-11-24), or null.
+ * first tells whose name comes first in the title, so the two names keep their places when switching.
+ */
+export function todayPair(studentId) {
+  const today = dateKey();
+  const events = store.all('events');
+  const students = store.all('students');
+  const booking = bookingFrom(events, students, studentId, today);
+  const partner = booking?.date === today ? partnerFor(events, students, booking) : null;
+  return partner ? { partner, first: String(booking.id).endsWith('#1') } : null;
+}
+
+/**
+ * The count runs by itself. Classes opened before it did get their number the first time they open.
+ * A 1:2 class counts for both (2026-11-24): the partner's number today when they opened first, otherwise the larger
+ * of the two counts, so a class one of them missed still counts for the pair.
+ */
 function giveClassNumber(session, student) {
   if (session.classNo) return;
   const history = doneSessions(store.all('sessions'), session.studentId).filter((s) => s.id !== session.id);
-  const { no, size } = nextClassNumber(history, student);
+  let { no, size } = nextClassNumber(history, student);
+  const partner = session.pairWith ? store.get('students', session.pairWith) : null;
+  if (partner) {
+    const theirs = store.all('sessions').find((s) => s.studentId === partner.id && s.date === session.date && s.classNo);
+    ({ no, size } = theirs ? { no: theirs.classNo, size: theirs.packageSize }
+      : pairClassNumber({ no, size }, nextClassNumber(doneSessions(store.all('sessions'), partner.id), partner), !!student?.classStart?.no, !!partner.classStart?.no));
+  }
   session.classNo = no;
   session.packageSize = size;
   // A number set by hand is for one class only; after that the count carries on from it.
@@ -54,13 +78,20 @@ export function openSession(studentId, kind) {
   }
   const history = doneSessions(store.all('sessions'), studentId);
   const plan = store.get('plans', studentId);
+  const partner = todayPair(studentId)?.partner;
+  let rows = startingRows(plan, history);
+  // A new student in a 1:2 class starts from the partner's exercises today, so the list is not built twice.
+  if (!rows.length && partner) {
+    const theirs = store.all('sessions').find((s) => s.studentId === partner.id && s.date === today && !s.deleted);
+    rows = planForPartner(theirs ? rowsFromSession(theirs) : startingRows(store.get('plans', partner.id), doneSessions(store.all('sessions'), partner.id)), history).rows;
+  }
   const session = {
     id: newId('ses'),
     studentId,
     date: today,
     kind: kind || history[0]?.kind || 'strength',
     status: 'draft',
-    rows: startingRows(plan, history),
+    rows,
     bpSys: null,
     bpDia: null,
     hr: null,
@@ -72,6 +103,7 @@ export function openSession(studentId, kind) {
     fromPlan: !!(plan && !plan.used && plan.rows?.length),
   };
   if (student?.demo) session.demo = true;
+  if (partner) session.pairWith = partner.id;
   giveClassNumber(session, student);
   store.save('sessions', session);
   return session;
@@ -116,6 +148,8 @@ export function recordView({ studentId, kind, sessionId }) {
     store.setMeta('editDrafts', all);
   };
   const previous = doneSessions(store.all('sessions'), studentId).find((s) => s.id !== session.id && s.date <= session.date);
+  // A 1:2 class: the two names sit at the top and one tap switches (2026-11-24). A past class is edited alone.
+  const pair = editing || session.date !== dateKey() ? null : todayPair(studentId);
   const undoStack = [];
   const firstOpenRow = Math.max(session.rows.findIndex((row) => row.sets.some((s) => !s.done)), 0);
   let selected = session.rows.length ? { row: firstOpenRow, set: firstOpenSet(session.rows[firstOpenRow]) } : null;
@@ -344,7 +378,9 @@ export function recordView({ studentId, kind, sessionId }) {
     classChip.replaceChildren(termRing(session.classNo, session.packageSize, false), h('span', {}, `${session.classNo}/${session.packageSize}`));
     classChip.setAttribute('aria-label', `今天是${classLabel(session.classNo, session.packageSize)}，點一下修正`);
     const text = nextDateText(store.get('students', studentId));
-    nextChip.replaceChildren(icon('today'), h('span', {}, text));
+    // 「下次」 is its own piece so a 1:2 class on an iPad mini can leave it out and keep one line (2026-11-24).
+    const word = text.match(/^下次\s?/)?.[0] || '';
+    nextChip.replaceChildren(icon('today'), h('span', {}, word && h('span', { class: 'next-word' }, word), text.slice(word.length)));
     nextChip.classList.toggle('is-unset', text.endsWith('未確認') || text.endsWith('？'));
     nextChip.setAttribute('aria-label', `${text}，點一下確認下次上課日期`);
   }
@@ -974,9 +1010,12 @@ export function recordView({ studentId, kind, sessionId }) {
         finishSession(session);
         store.save('students', { ...store.get('students', studentId), nextNotes: notes.value, isNew: false });
         close();
-        toast(`${student.name} 的紀錄已儲存`);
+        // In a 1:2 class the other student comes next, unless they are finished already.
+        const next = pair && !store.all('sessions').some((s) => s.studentId === pair.partner.id && s.date === session.date && s.status === 'done') ? pair.partner : null;
+        toast(next ? `${student.name} 的紀錄已儲存，接著是 ${next.name}` : `${student.name} 的紀錄已儲存`);
         home();
         if (showReport) go('report', { studentId, sessionId: session.id });
+        else if (next) go('record', { studentId: next.id, kind: session.kind });
       }
     });
   }
@@ -984,11 +1023,11 @@ export function recordView({ studentId, kind, sessionId }) {
   buildGrid();
 
   const screen = h('div', { class: 'screen record' },
-    h('header', { class: 'topbar' },
+    h('header', { class: `topbar${pair ? ' is-pair' : ''}` },
       editing
         ? h('button', { type: 'button', class: 'btn ghost back', 'aria-label': '返回', onclick: () => leave(back) }, icon('back'), h('span', {}, '返回'))
         : backButton(),
-      h('h1', {}, student.name, h('small', {}, editing ? `${session.date.slice(5).replace('-', '/')} 修改中` : kindLabel(session.kind))),
+      pair ? pairSwitch(pair, student, session) : h('h1', {}, student.name, h('small', {}, editing ? `${session.date.slice(5).replace('-', '/')} 修改中` : kindLabel(session.kind))),
       h('div', { class: 'class-chips' }, classChip, !editing && nextChip),
       h('div', { class: 'topbar-actions' },
         button('總覽', () => leave(() => go('overview', { studentId })), 'ghost'),
@@ -1020,6 +1059,26 @@ export function recordView({ studentId, kind, sessionId }) {
     });
   }
   return screen;
+}
+
+/**
+ * The two students of a 1:2 class, in the order of the calendar title. The one shown is pressed; tapping the other
+ * opens their class (started from the plan or last time on the first tap) without adding a step to 返回.
+ * A check marks a student already finished today.
+ */
+function pairSwitch(pair, student, session) {
+  const finished = (id) => store.all('sessions').some((s) => s.studentId === id && s.date === session.date && s.status === 'done');
+  const name = (who, current) => h('button', {
+    type: 'button',
+    class: 'pair-name',
+    'aria-pressed': current ? 'true' : 'false',
+    'aria-label': current ? `${who.name}，正在看` : `換到 ${who.name}`,
+    onclick: current ? null : () => swap('record', { studentId: who.id, kind: session.kind }),
+  }, h('span', { class: who.name.length > 4 ? 'is-long' : null }, who.name), finished(who.id) ? icon('check') : null);
+  const names = [name(student, true), name(pair.partner, false)];
+  return h('div', { class: 'pair-switch', role: 'group', 'aria-label': `一對二・${kindLabel(session.kind)}` },
+    h('h1', { class: 'sr-only' }, student.name),
+    ...(pair.first ? names : names.reverse()));
 }
 
 /**

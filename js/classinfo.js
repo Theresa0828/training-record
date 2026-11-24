@@ -24,6 +24,13 @@ export function classNumberSheet(studentId, session, onDone) {
         session.packageSize = size;
         store.save('sessions', session);
         store.save('students', { ...latest, packageSize: size });
+        // A 1:2 class counts for both (2026-11-24), so the partner's class today gets the same number.
+        const partnerSession = session.pairWith && store.all('sessions').find((s) => s.studentId === session.pairWith && s.date === session.date);
+        if (partnerSession) {
+          store.save('sessions', { ...partnerSession, classNo: no, packageSize: size });
+          const partner = store.get('students', session.pairWith);
+          if (partner) store.save('students', { ...partner, packageSize: size });
+        }
       } else {
         store.save('students', { ...latest, packageSize: size, classStart: { no, size } });
       }

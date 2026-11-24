@@ -176,12 +176,89 @@ export function guessCalendarKind(name) {
   return 'shared';
 }
 
-export function parsePlainTitle(title) {
+// What colleagues write around a name (2026-11-24 第四輪表單): notes always come after the full name, either stuck
+// to it (陳小小女士) or after a space (黃中中女士 會員, 盧OOO 盧姊 VIP). They are dropped and never shown.
+const NAME_NOTES = /(會員|VIP|家屬|顧問)$/i;
+const HONORIFICS = /(女士|先生|小姐)$/;
+const LATIN_WORD = /^[A-Za-z][A-Za-z.'’-]*$/;
+
+/**
+ * One person in a title. A change such as 病假 may come first in brackets, sometimes only the closing one
+ * ((病假)黃大大, 病假）黃大大). The first word is the name; an English name keeps its surname (Amy Chen).
+ * A four-digit birthday may follow, stuck to the name or after a space. Everything else is a note.
+ */
+function parseTitlePerson(part) {
+  let text = String(part || '').trim();
+  let change = '';
+  const bracket = text.match(/^[（(]?\s*([^（）()\s]{1,8})\s*[）)]\s*/);
+  if (bracket) {
+    change = bracket[1];
+    text = text.slice(bracket[0].length);
+  }
+  const words = text.split(/[\s　]+/).filter(Boolean);
+  if (!words.length) return null;
+  let name = words.shift();
+  while (LATIN_WORD.test(name.split(' ').pop()) && words.length && LATIN_WORD.test(words[0]) && !/^vip$/i.test(words[0])) name += ` ${words.shift()}`;
+  let birthday = '';
+  for (;;) {
+    const stuck = name.match(/^(.+?)(\d{4})$/);
+    if (stuck) { birthday = birthday || stuck[2]; name = stuck[1]; continue; }
+    const shorter = name.replace(NAME_NOTES, '').replace(HONORIFICS, '').trim();
+    // A name is at least two characters, so 林先生 alone stays as it is.
+    if (shorter !== name && shorter.length >= 2) { name = shorter; continue; }
+    break;
+  }
+  if (!birthday) birthday = words.find((word) => /^\d{4}$/.test(word)) || '';
+  if (!name || name.length > 12) return null;
+  return { student: name, birthday, change };
+}
+
+/**
+ * A title on the teacher's own calendar. 可排 marks a slot still open for booking: it is no class and is not shown.
+ * A 1:2 class has two names split by / (王小明/陳小小). Returns null when a name cannot be read.
+ */
+export function parseOwnTitle(title) {
   const text = String(title || '').replace(/【[^】]*】/g, '').trim();
-  const match = text.match(/^(.+?)[\s　]*(\d{4})$/);
-  const student = (match ? match[1] : text).trim();
-  if (!student || student.length > 12) return null;
-  return { student, birthday: match ? match[2] : '' };
+  if (!text) return null;
+  if (/^可排/.test(text)) return { open: true, people: [] };
+  const people = text.split(/[/／]/).map(parseTitlePerson);
+  if (people.length > 2 || people.some((person) => !person)) return null;
+  return { open: false, people };
+}
+
+/** The older one-name reading, kept for anything that only needs the name and birthday. */
+export function parsePlainTitle(title) {
+  const parsed = parseOwnTitle(title);
+  if (!parsed || parsed.open || parsed.people.length !== 1) return null;
+  return { student: parsed.people[0].student, birthday: parsed.people[0].birthday };
+}
+
+/**
+ * One calendar event as the bookings the app keeps. A 1:2 class becomes one booking per student, tied by group,
+ * so every per-student list (下次上課, new students, plans) keeps working. 可排 gives none. A change such as
+ * (病假) stays on the booking as change: the student is found, but it is not a class.
+ */
+export function bookingsFromEvent(event, teacher) {
+  const own = event.calendarKind && event.calendarKind !== 'shared';
+  const base = { id: event.id, date: event.date, time: event.time };
+  // An old-style title still reads the same way on any calendar.
+  const formal = parseBookingTitle(event.title, teacher);
+  if (formal) return [{ ...base, student: formal.student, birthday: '', kind: own ? event.calendarKind : formal.kind, unreadable: false, title: '' }];
+  if (!own) return [{ ...base, student: '', birthday: '', kind: 'strength', unreadable: isUnreadableBooking(event.title, teacher), title: event.title }];
+  const parsed = parseOwnTitle(event.title);
+  if (parsed?.open) return [];
+  if (!parsed) return [{ ...base, student: '', birthday: '', kind: event.calendarKind, unreadable: true, title: event.title }];
+  const pair = parsed.people.length > 1;
+  return parsed.people.map((person, index) => ({
+    ...base,
+    ...(pair ? { id: `${event.id}#${index + 1}`, group: event.id } : {}),
+    student: person.student,
+    birthday: person.birthday,
+    kind: event.calendarKind,
+    unreadable: false,
+    title: '',
+    ...(person.change ? { change: person.change } : {}),
+  }));
 }
 
 /** A birthday as four digits (月日), or '' when it is not one. */
@@ -410,11 +487,11 @@ export function dateWithWeek(key) {
   return `${m}/${d}（${'日一二三四五六'[new Date(y, m - 1, d).getDay()]}）`;
 }
 
-/** The student's first booking after a day, read from the calendar. */
+/** The student's first booking after a day, read from the calendar. A booking marked 病假 or the like is not a class. */
 export function nextBooking(student, events, today, students = [student]) {
   return events
     .filter((e) => {
-      if (e.date <= today) return false;
+      if (e.date <= today || e.change) return false;
       const found = studentForEvent(students, e);
       return !!found && (found === student || (found.id && found.id === student.id));
     })
@@ -570,7 +647,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v36';
+export const APP_VERSION = 'v37';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -662,7 +739,7 @@ export function studentsNeedingPlan(events, students, plans, today) {
   const seen = new Set();
   const result = [];
   for (const event of events) {
-    if (event.date < today) continue;
+    if (event.date < today || event.change) continue;
     const student = studentForEvent(students, event);
     if (!student || seen.has(student.id)) continue;
     seen.add(student.id);
@@ -670,6 +747,70 @@ export function studentsNeedingPlan(events, students, plans, today) {
     if (!plan || plan.used || !plan.rows || !plan.rows.length) result.push({ student, event });
   }
   return result;
+}
+
+/**
+ * The student's first booking on or after a day, leaving out one marked 病假 or the like.
+ * Used to find who shares today's or the next class in a 1:2 lesson.
+ */
+export function bookingFrom(events, students, studentId, fromDate) {
+  return events
+    .filter((e) => e.date >= fromDate && !e.change && studentForEvent(students, e)?.id === studentId)
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0] || null;
+}
+
+/**
+ * The other student of a 1:2 booking (two names in one calendar title, 2026-11-24), or null.
+ * A partner marked 病假 is not in class, so the lesson runs as a 1:1 that day.
+ */
+export function partnerFor(events, students, booking) {
+  if (!booking?.group || booking.change) return null;
+  const other = events.find((e) => e.group === booking.group && e.id !== booking.id && !e.change);
+  const student = other ? studentForEvent(students, other) : null;
+  return student && !student.deleted ? student : null;
+}
+
+/**
+ * A 1:2 class counts for both students together (2026-11-24 第三輪表單). When one missed a class the other came to,
+ * the pair carries on from the larger count, because that class was still part of their term.
+ */
+export function pairClassNumber(mine, theirs, mineByHand = false, theirsByHand = false) {
+  // A number the teacher set by hand (修正下一堂是第幾堂) wins, so a new term can start lower.
+  if (mineByHand || !theirs) return mine;
+  if (theirsByHand) return theirs;
+  return theirs.no > mine.no ? theirs : mine;
+}
+
+/**
+ * A plan written for one student of a 1:2 class, made ready for the other (2026-11-24): the same exercises, order
+ * and number of sets, with each weight, reps and spring taken from the partner's own last time on that exercise
+ * with the same equipment, since the two usually lift different weights. An exercise the partner has never done keeps
+ * the planned values and is listed in fresh. history is the partner's finished classes, newest first.
+ */
+export function planForPartner(rows, history) {
+  const same = (a, b) => (a.exerciseId ? a.exerciseId === b.exerciseId : a.name === b.name) && (a.equipment || '') === (b.equipment || '');
+  const fresh = [];
+  const copied = rows.map((row) => {
+    const copy = JSON.parse(JSON.stringify(row));
+    copy.id = newId('row');
+    let own = null;
+    for (const session of history) {
+      own = (session.rows || []).find((r) => same(r, row) && r.sets?.some((set) => set.done));
+      if (own) break;
+    }
+    if (!own) {
+      fresh.push(row.name);
+      return copy;
+    }
+    const done = own.sets.filter((set) => set.done);
+    copy.sets = row.sets.map((set, i) => {
+      const from = done[Math.min(i, done.length - 1)];
+      return makeSet({ weight: from.weight, reps: from.reps, spring: from.spring });
+    });
+    if (own.band) copy.band = own.band;
+    return copy;
+  });
+  return { rows: copied, fresh };
 }
 
 // Past this many reps the estimate drifts too far, so those sets do not count (2026-11-17).

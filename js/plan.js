@@ -1,7 +1,7 @@
 // Plans the next class: starts from last time, then the teacher tweaks it.
 import { h, button, holdButton, back, backButton, go, openSheet, toast, dismissActionToast } from './dom.js';
 import * as store from './store.js';
-import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, swapRow, commonSprings, moveRow, BAND, springKind, patternCounts } from './core.js';
+import { MAX_SETS, doneSessions, rowsFromSession, makeRow, makeSet, suggestProgression, applySuggestion, swapRow, commonSprings, moveRow, BAND, springKind, patternCounts, dateKey, addDays, dateWithWeek, bookingFrom, partnerFor, planForPartner } from './core.js';
 import { exercisePicker, rememberSwaps } from './library.js';
 import { handoutButton } from './handout.js';
 import { springEditor } from './spring.js';
@@ -21,6 +21,34 @@ export function apparatusOf(row) {
 export function apparatusSprings(row, limit = 4) {
   const kind = springKind(apparatusOf(row));
   return commonSprings(store.all('sessions'), limit, (r) => r.kind === 'pilates' && springKind(apparatusOf(r)) === kind);
+}
+
+/**
+ * Who shares the student's next class, when it is a 1:2 class (2026-11-24). A class already finished today is behind
+ * us, so the next one is looked for from tomorrow.
+ */
+function nextPair(studentId) {
+  const today = dateKey();
+  const doneToday = store.all('sessions').some((s) => s.studentId === studentId && s.date === today && s.status === 'done');
+  const events = store.all('events');
+  const students = store.all('students');
+  const booking = bookingFrom(events, students, studentId, doneToday ? addDays(today, 1) : today);
+  const partner = partnerFor(events, students, booking);
+  return partner ? { partner, booking } : null;
+}
+
+/** An unused plan the student already has, which a copy would replace. */
+function ownPlan(studentId) {
+  const plan = store.get('plans', studentId);
+  return plan && !plan.used && plan.rows?.length ? plan : null;
+}
+
+/** Gives the partner the same exercises with their own last weights. Returns what was there before, for undo. */
+function copyToPartner(rows, partner) {
+  const before = store.get('plans', partner.id) || null;
+  const { rows: copied } = planForPartner(rows, doneSessions(store.all('sessions'), partner.id));
+  store.save('plans', { ...(before || {}), id: partner.id, rows: copied, used: false, ...(partner.demo ? { demo: true } : {}) });
+  return before;
 }
 
 function loadPlan(studentId, history) {
@@ -206,6 +234,31 @@ export function planView({ studentId }) {
 
   draw();
 
+  // 排課排一次兩位都帶入，再各自微調 (2026-11-24): a partner without a plan of their own gets this one at 排好了.
+  // Once they have one, it is theirs to adjust, so it is only replaced on purpose with the hold button.
+  const pair = nextPair(studentId);
+  const pairNote = h('section', { class: 'callout stack-sm pair-note' });
+  function drawPair() {
+    if (!pair) return;
+    const { partner, booking } = pair;
+    const theirs = ownPlan(partner.id);
+    // replaceChildren writes null as text, so the empty item is filtered out first.
+    pairNote.replaceChildren(...[
+      h('p', { class: 'pair-note-title' }, `一對二：和 ${partner.name} 一起上`, h('small', {}, ` ${dateWithWeek(booking.date)}${booking.time ? ` ${booking.time}` : ''}`)),
+      h('p', { class: 'muted' }, theirs
+        ? `${partner.name} 已經有自己的課表，不會被這份蓋掉。`
+        : `按「排好了」會一起帶入 ${partner.name} 的課表，重量和次數用 ${partner.name} 上次做的。`),
+      theirs && holdButton(`用這份蓋掉 ${partner.name} 的課表`, () => {
+        if (!plan.rows.length) { toast('請先加入動作'); return; }
+        const before = copyToPartner(plan.rows, partner);
+        drawPair();
+        toast(`已帶入 ${partner.name} 的課表`, { label: '復原', run: () => { store.save('plans', before); drawPair(); } });
+      }, 'ghost'),
+      button(`看 ${partner.name} 的課表`, () => go('plan', { studentId: partner.id }), 'ghost'),
+    ].filter(Boolean));
+  }
+  drawPair();
+
   return h('div', { class: 'screen' },
     h('header', { class: 'topbar' },
       backButton(),
@@ -216,11 +269,15 @@ export function planView({ studentId }) {
           if (!plan.rows.length) { toast('請先加入動作'); return; }
           persist();
           rememberSwaps(plan.rows, plan.demo);
-          toast('課表已儲存，下次上課會自動帶入');
+          const partner = pair && !ownPlan(pair.partner.id) ? pair.partner : null;
+          if (partner) copyToPartner(plan.rows, partner);
           back();
+          if (partner) toast(`課表已儲存，也帶入了 ${partner.name} 的課表`, { label: `看 ${partner.name} 的`, run: () => go('plan', { studentId: partner.id }) });
+          else toast('課表已儲存，下次上課會自動帶入');
         }, 'primary'))),
     h('main', { class: 'page plan-layout' },
       h('div', { class: 'plan-side stack' },
+        pair && pairNote,
         (student.contraindications || student.nextNotes) && h('section', { class: 'callout stack-sm' },
           student.contraindications && h('p', { class: 'contra' }, `禁忌：${student.contraindications}`),
           student.nextNotes && h('p', {}, `注意：${student.nextNotes}`)),

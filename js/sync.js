@@ -1,6 +1,6 @@
 // Talks to the Apps Script on the teacher's Google account. Runs only in the background.
 import * as store from './store.js';
-import { mergeRecords, fileForRecord, collectionForFile, parseBookingTitle, isUnreadableBooking, dateKey, chosenCalendars, mergeCalendarEvents, parsePlainTitle, photoFileName, mediaFolderName, mediaExtension, isVideo } from './core.js';
+import { mergeRecords, fileForRecord, collectionForFile, bookingsFromEvent, dateKey, chosenCalendars, mergeCalendarEvents, photoFileName, mediaFolderName, mediaExtension, isVideo } from './core.js';
 
 const statusListeners = new Set();
 let status = { state: 'idle', message: '' };
@@ -204,22 +204,8 @@ async function syncCalendar() {
   const signature = JSON.stringify(events.map((e) => [e.id, e.date, e.time, e.title]));
   const changed = calendarSignature !== null && signature !== calendarSignature;
   calendarSignature = signature;
-  store.replaceEvents(events.map((event) => {
-    const own = event.calendarKind !== 'shared';
-    // An old-style title still reads the same way on any calendar; otherwise the title is the student's name.
-    const formal = parseBookingTitle(event.title, teacher);
-    const parsed = formal || (own ? parsePlainTitle(event.title) : null);
-    return {
-      id: event.id,
-      date: event.date,
-      time: event.time,
-      student: parsed ? parsed.student : '',
-      birthday: parsed?.birthday || '',
-      kind: own ? event.calendarKind : parsed ? parsed.kind : 'strength',
-      unreadable: own ? !parsed : isUnreadableBooking(event.title, teacher),
-      title: parsed ? '' : event.title,
-    };
-  }));
+  // One booking per student: a 1:2 class gives two, 可排 none (2026-11-24).
+  store.replaceEvents(events.flatMap((event) => bookingsFromEvent(event, teacher)));
   if (changed) for (const listener of calendarListeners) listener();
 }
 

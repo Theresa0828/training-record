@@ -112,12 +112,31 @@ export function loadDemo() {
     pilatesRow(DEMO_PILATES[2], '1r1y', 8), pilatesRow(DEMO_PILATES[3], '', 6),
   ], { classNo: 23, packageSize: 24 }));
 
+  // A 1:2 class (2026-11-24): the same exercises, each with their own weights. D came once while E was on 病假,
+  // so the pair's next class carries on from D's count.
+  store.saveFromSync('students', { id: 'demo_s4', name: '示範學員 D', aliases: [], demo: true, updatedAt: 1, goal: '和家人一起練，維持肌力', contraindications: '', nextNotes: '' });
+  store.saveFromSync('students', { id: 'demo_s5', name: '示範學員 E', aliases: [], demo: true, updatedAt: 1, goal: '改善肩頸緊繃', contraindications: '右肩夾擠，避免過頭推', nextNotes: '' });
+  const pairRows = (w1, w2) => {
+    const fallback = { id: 'demo_ex_s', name: '深蹲', kind: 'strength' };
+    const rows = [doneRow(squat || fallback, w1, 10), doneRow(row1 || fallback, w2, 12)];
+    rows[0].equipment = '壺鈴';
+    return rows;
+  };
+  store.saveFromSync('sessions', session('demo_p1', 'demo_s4', dayOffset(-14), 'strength', pairRows(14, 27.5), { classNo: 2, packageSize: 12, pairWith: 'demo_s5' }));
+  store.saveFromSync('sessions', session('demo_p2', 'demo_s5', dayOffset(-14), 'strength', pairRows(6, 12.5), { classNo: 2, packageSize: 12, pairWith: 'demo_s4' }));
+  store.saveFromSync('sessions', session('demo_p3', 'demo_s4', dayOffset(-7), 'strength', pairRows(16, 30), { classNo: 3, packageSize: 12 }));
+
   const today = dayOffset(0);
   store.replaceEvents([
     { id: 'demo_e1', date: today, time: '10:00', student: '示範學員 A', kind: 'strength', demo: true },
     { id: 'demo_e2', date: today, time: '11:00', student: '示範學員 B', kind: 'pilates', demo: true },
     { id: 'demo_e3', date: today, time: '14:00', student: '示範學員 C', kind: 'strength', demo: true },
     { id: 'demo_e4', date: dayOffset(2), time: '10:00', student: '示範學員 A', kind: 'strength', demo: true },
+    { id: 'demo_e5#1', group: 'demo_e5', date: today, time: '15:00', student: '示範學員 D', kind: 'strength', demo: true },
+    { id: 'demo_e5#2', group: 'demo_e5', date: today, time: '15:00', student: '示範學員 E', kind: 'strength', demo: true },
+    { id: 'demo_e6', date: today, time: '16:00', student: '示範學員 F', kind: 'pilates', change: '病假', demo: true },
+    { id: 'demo_e7#1', group: 'demo_e7', date: dayOffset(3), time: '15:00', student: '示範學員 D', kind: 'strength', demo: true },
+    { id: 'demo_e7#2', group: 'demo_e7', date: dayOffset(3), time: '15:00', student: '示範學員 E', kind: 'strength', demo: true },
   ]);
   store.setMeta('demoLoaded', true);
 }
