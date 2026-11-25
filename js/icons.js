@@ -45,34 +45,6 @@ export function icon(name, className = '') {
   return svg;
 }
 
-/** Share of sets completed, drawn as a ring with the number inside. */
-export function ring(percent) {
-  const RADIUS = 26;
-  const length = 2 * Math.PI * RADIUS;
-  const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 64 64');
-  svg.setAttribute('class', 'ring');
-  svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', `完成 ${percent}%`);
-  const circle = (className) => {
-    const c = document.createElementNS(NS, 'circle');
-    c.setAttribute('cx', 32);
-    c.setAttribute('cy', 32);
-    c.setAttribute('r', RADIUS);
-    c.setAttribute('class', className);
-    return c;
-  };
-  const value = circle('ring-value');
-  value.setAttribute('stroke-dasharray', `${(length * percent) / 100} ${length}`);
-  const text = document.createElementNS(NS, 'text');
-  text.setAttribute('x', 32);
-  text.setAttribute('y', 37);
-  text.setAttribute('text-anchor', 'middle');
-  text.textContent = `${percent}%`;
-  svg.append(circle('ring-track'), value, text);
-  return svg;
-}
-
 /** A Reformer in side view, for screens with nothing on them yet. */
 export function reformer() {
   const svg = document.createElementNS(NS, 'svg');

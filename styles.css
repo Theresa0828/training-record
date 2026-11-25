@@ -180,12 +180,7 @@ textarea.input { min-height: 96px; resize: vertical; }
 .today-date { color: var(--muted); }
 .sync { display: flex; align-items: center; gap: 2px; }
 .hero { background: var(--hero); color: var(--on-hero); border-radius: 28px; padding: 22px; display: grid; gap: 16px; box-shadow: var(--card-shadow); align-content: start; min-width: 0; }
-.tiles { display: grid; gap: 12px; grid-auto-rows: 1fr; min-width: 0; }
-.tile { display: grid; gap: 6px; align-content: center; justify-items: start; background: var(--surface); border: 0; border-radius: 24px; padding: 16px 18px; box-shadow: var(--card-shadow); color: inherit; font: inherit; text-align: left; min-width: 0; }
-.tile-link { cursor: pointer; touch-action: pan-x pan-y; transition: transform .12s var(--ease); }
-.tile-link:active { transform: scale(.98); }
 .tile-title { font-size: 16px; font-weight: 500; color: var(--muted); }
-.tile-number { font-size: 44px; line-height: 1.1; font-weight: 700; font-variant-numeric: tabular-nums; }
 .hero-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .hero-label { font-size: 16px; }
 .hero-chip { font-size: 13px; padding: 2px 12px; border-radius: 99px; background: var(--hero-soft); }
@@ -207,21 +202,70 @@ textarea.input { min-height: 96px; resize: vertical; }
   background: var(--surface); border: 0; border-radius: 20px; box-shadow: var(--card-shadow); color: inherit; font: inherit; text-align: left; cursor: pointer; touch-action: pan-x pan-y; transition: transform .12s var(--ease);
 }
 .slot:active { transform: scale(.98); }
-.slot-dot { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; box-shadow: inset 0 0 0 2px var(--line-strong); }
-.slot-dot .icon { width: 16px; height: 16px; stroke-width: 3; }
-.slot.is-done .slot-dot { background: var(--done); color: var(--on-done); box-shadow: none; }
-.slot.is-done .slot-time, .slot.is-done .slot-name { color: var(--muted); }
-.slot-time { font-variant-numeric: tabular-nums; }
 .slot-name { font-size: 20px; line-height: 1.3; }
 .slot-meta { font-size: 13px; color: var(--muted); display: block; }
 .slot .icon.go { color: var(--muted); }
-/* A 1:2 class: the two students stay together as one block, each row opening its own overview (2026-11-24). */
-.slot-pair { display: grid; gap: 2px; border-radius: 20px; overflow: hidden; box-shadow: var(--card-shadow); }
-.slot-pair .slot { border-radius: 0; box-shadow: none; }
-.slot.is-away .slot-name { color: var(--muted); }
-.slot-tag { display: inline-block; font-size: 13px; line-height: 1.5; margin-left: 8px; padding: 0 10px; border-radius: 99px; background: var(--soft); color: var(--fg); vertical-align: middle; }
+/* A 1:2 class: the two names in the next-class card, split by a faint slash (2026-11-24). */
 .hero-pair-sep { opacity: .55; }
 .task-dot { background: var(--next-soft); color: var(--primary-text); box-shadow: none; }
+/* 今天的學生 (2026-11-25): every booking of today in one card beside the next class, in place of the 今天進度 and
+   還沒排課表 tiles: time and name, which class, and whether the plan is written; leave stays listed with the reason. */
+.today-list { display: grid; gap: 10px; align-content: start; background: var(--surface); border-radius: 24px; padding: 16px 12px; box-shadow: var(--card-shadow); min-width: 0; }
+.tl-head { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 8px; flex-wrap: wrap; padding-inline: 4px; }
+.tl-progress { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tl-rows { display: grid; gap: 6px; }
+.tl-row {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 8px; width: 100%; min-height: 56px; padding: 8px 8px 8px 6px;
+  border: 0; border-radius: 14px; background: var(--bg); color: inherit; font: inherit; text-align: left; cursor: pointer; touch-action: pan-x pan-y; transition: transform .12s var(--ease);
+}
+.tl-row:active { transform: scale(.98); }
+.tl-dot { width: 20px; height: 20px; margin-top: 2px; border-radius: 50%; display: grid; place-items: center; box-shadow: inset 0 0 0 2px var(--line-strong); }
+.tl-dot .icon { width: 14px; height: 14px; stroke-width: 3; }
+.tl-row.is-done .tl-dot { background: var(--done); color: var(--on-done); box-shadow: none; }
+.tl-row.is-away .tl-dot { box-shadow: inset 0 0 0 2px var(--line); }
+.tl-row.is-done .tl-who, .tl-row.is-away .tl-who { color: var(--muted); }
+.tl-main { display: grid; gap: 4px; min-width: 0; }
+.tl-who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font-size: 16px; line-height: 1.35; }
+.tl-time { font-variant-numeric: tabular-nums; }
+.tl-name { font-weight: 500; overflow-wrap: anywhere; }
+.tl-name .name-birthday { font-size: 13px; }
+.tl-tag { font-size: 13px; line-height: 1.6; padding: 0 8px; border-radius: 99px; background: var(--soft); color: var(--fg); }
+.tl-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; color: var(--muted); }
+.tl-meta:empty { display: none; }
+.tl-plan { padding: 0 8px; border-radius: 99px; background: var(--soft); color: var(--fg); line-height: 1.6; white-space: nowrap; }
+.tl-plan.is-ready { background: var(--done); color: var(--on-done); }
+.tl-pair { display: grid; gap: 2px; border-radius: 14px; overflow: hidden; }
+.tl-pair .tl-row { border-radius: 0; }
+.tl-pair-label { font-size: 13px; line-height: 1.4; color: var(--muted); background: var(--bg); padding: 6px 10px 0 34px; margin-bottom: -2px; }
+/* 還沒排課表 as a calendar (2026-11-25): Monday-first weeks; on a phone only the days with bookings, as a list. */
+.plan-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.pc-head { font-size: 13px; color: var(--muted); text-align: center; }
+.pc-day { min-width: 0; min-height: 84px; display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 14px; background: var(--surface); box-shadow: var(--card-shadow); }
+.pc-day.is-past { background: transparent; box-shadow: none; }
+.pc-day.is-past .pc-num { opacity: .55; }
+.pc-day.is-today { box-shadow: inset 0 0 0 2px var(--line-strong); }
+.pc-day.is-today .pc-num { color: var(--fg); font-weight: 700; }
+.pc-num { font-size: 13px; line-height: 1.4; color: var(--muted); font-variant-numeric: tabular-nums; padding-left: 2px; }
+.pc-full { display: none; }
+.pc-items { display: grid; gap: 4px; }
+.pc-chip {
+  display: grid; align-content: center; width: 100%; min-height: 48px; padding: 4px 6px; border: 0; border-radius: 10px;
+  background: var(--next-soft); color: var(--fg); font: inherit; text-align: left; cursor: pointer; touch-action: pan-x pan-y; transition: transform .12s var(--ease);
+}
+.pc-chip:active { transform: scale(.96); }
+.pc-time { font-size: 13px; line-height: 1.4; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pc-time:empty { display: none; }
+.pc-name { font-size: 16px; line-height: 1.25; font-weight: 500; overflow-wrap: anywhere; }
+.pc-name .name-birthday { font-size: 13px; }
+.pc-count { font-size: 13px; line-height: 1.4; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 640px) {
+  .plan-cal { grid-template-columns: minmax(0, 1fr); }
+  .pc-head, .pc-num, .pc-day.is-empty { display: none; }
+  .pc-day { min-height: 0; display: grid; grid-template-columns: 84px minmax(0, 1fr); align-items: start; gap: 8px; padding: 8px 10px; }
+  .pc-full { display: block; font-size: 16px; font-weight: 500; line-height: 48px; }
+  .pc-chip { display: flex; flex-wrap: wrap; align-content: center; align-items: baseline; gap: 0 8px; padding-inline: 10px; }
+  .pc-name { flex: 1; min-width: 0; }
+}
 .welcome { display: grid; gap: 16px; justify-items: start; background: var(--surface); border-radius: 28px; padding: 24px; box-shadow: var(--card-shadow); }
 .drawing { width: 220px; max-width: 100%; height: auto; fill: none; stroke: var(--line-strong); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
 .empty { display: grid; gap: 12px; justify-items: center; text-align: center; padding: 32px 16px; color: var(--muted); }
@@ -479,11 +523,6 @@ textarea.input { min-height: 96px; resize: vertical; }
 .card-title { display: flex; align-items: center; gap: 8px; color: var(--muted); }
 .first-card.is-alert .card-title { color: inherit; }
 .contra { font-size: 20px; line-height: 1.45; }
-.ring { width: 72px; height: 72px; flex: none; }
-.ring circle { fill: none; stroke-width: 7; }
-.ring-track { stroke: var(--soft); }
-.ring-value { stroke: var(--primary); stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; }
-.ring text { font: 400 15px var(--font); fill: var(--fg); }
 .history-row { display: grid; gap: 2px; padding: 10px 0; border-top: 1px solid var(--line); }
 .history-main { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: space-between; }
 .history-sets { display: flex; flex-wrap: wrap; gap: 4px 10px; font-variant-numeric: tabular-nums; }
@@ -551,8 +590,8 @@ textarea.input { min-height: 96px; resize: vertical; }
 @keyframes panel-in { from { transform: translateY(6px); opacity: .3; } }
 @keyframes guide-in { from { transform: translateX(10px); opacity: 0; } }
 /* Weights: 700 for titles and numbers read at a glance, 500 for section heads, names and buttons, 400 for everything else. */
-h2, .section-title, .card-title, .hero-label, .hero-chip, .hero-note, .slot-name, .slot-time, .grid-name-text, .guide-text, .vital-value, .pain-target, .btn, .key, .tab.is-active, .panel-tab[aria-selected="true"], .contra, .fold summary, .banner p:first-child, .trend-name, .trend-readout { font-weight: 500; }
-h1, .card-head, .welcome h2, .hero-time, .hero-name, .panel-head strong, .stepper-value, .trend-now, .vital-field .vital-value, .ring text, .btn.primary, .btn.big, .action-bar .btn.primary, .grid-name.is-selected .grid-name-text, .cell.is-next span, .cell.is-selected span { font-weight: 700; }
+h2, .section-title, .card-title, .hero-label, .hero-chip, .hero-note, .slot-name, .grid-name-text, .guide-text, .vital-value, .pain-target, .btn, .key, .tab.is-active, .panel-tab[aria-selected="true"], .contra, .fold summary, .banner p:first-child, .trend-name, .trend-readout { font-weight: 500; }
+h1, .card-head, .welcome h2, .hero-time, .hero-name, .panel-head strong, .stepper-value, .trend-now, .vital-field .vital-value, .btn.primary, .btn.big, .action-bar .btn.primary, .grid-name.is-selected .grid-name-text, .cell.is-next span, .cell.is-selected span { font-weight: 700; }
 h1 small, .stepper-value small { font-weight: 400; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -568,7 +607,6 @@ h1 small, .stepper-value small { font-weight: 400; }
 }
 @media (max-width: 640px) {
   .bento > .span-2, .bento > .span-3, .bento > .span-4 { grid-column: 1 / -1; }
-  .tiles { grid-template-columns: 1fr 1fr; }
   .grid-swap { display: none; }
   .grid-handle { width: 26px; }
   .grid-handle span { transform: scale(.8); }

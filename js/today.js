@@ -1,10 +1,9 @@
 import { h, button, go, tab, tabBar, refreshView } from './dom.js';
 import * as store from './store.js';
-import { dateKey, chosenCalendars, studentForEvent, bookingIsUnclear, newStudentBookings, doneSessions, studentsNeedingPlan, newId, nextClassNumber, classLabel, pairClassNumber } from './core.js';
-import { nextDateText } from './classinfo.js';
+import { dateKey, chosenCalendars, studentForEvent, bookingIsUnclear, newStudentBookings, doneSessions, studentsNeedingPlan, planCalendarWeeks, newId, nextClassNumber, classLabel, pairClassNumber, laterClassNumber } from './core.js';
 import { currentStatus, isConnected, syncNow } from './sync.js';
 import { loadDemo } from './demo.js';
-import { icon, reformer, ring } from './icons.js';
+import { icon, reformer } from './icons.js';
 
 const KIND = { strength: '重訓', pilates: '皮拉提斯' };
 
@@ -48,7 +47,7 @@ function describe(event, today) {
   const content = hasPlan ? '用排好的課表' : last ? '帶入上次內容' : '還沒有紀錄';
   const history = doneSessions(store.all('sessions'), student.id).filter((s) => s.date !== today);
   const count = session?.classNo ? { no: session.classNo, size: session.packageSize } : nextClassNumber(history, student);
-  return { event, student, session, last, content, count, done: session?.status === 'done', inClass: session?.status === 'draft' };
+  return { event, student, session, last, content, count, planned: !!hasPlan, done: session?.status === 'done', inClass: session?.status === 'draft' };
 }
 
 /**
@@ -127,30 +126,47 @@ function heroCard(lesson, span) {
         : button('看總覽', () => go('overview', { studentId: first.student.id }), 'ghost')));
 }
 
-function slotRow(item, lesson) {
-  const { student, last, content, done } = item;
-  const away = !!item.event.change;
-  const label = [kindLabel(item.event.kind), lesson.present.length > 1 ? '一對二' : '', away ? '' : lesson.classText].filter(Boolean).join('・');
-  const meta = away ? `${kindLabel(item.event.kind)}・${item.event.change}，不算一堂`
-    : done ? `${label}・已完成・${nextDateText(student)}`
-      : `${label}・${content}${last ? `・上次 ${shortDate(last.date)}` : ''}`;
+/**
+ * One of today's students in the 今天的學生 card: time and name, which class, and whether the plan is written.
+ * A student on leave stays listed with the reason. A row opens the student's overview.
+ */
+function todayRow(item, lesson) {
+  const { student, event, done, inClass, planned } = item;
+  const away = !!event.change;
+  const state = away ? '不算一堂' : done ? '已完成' : inClass ? '上課中' : '';
+  const meta = away ? [] : [lesson.classText].filter(Boolean);
   return h('button', {
     type: 'button',
-    class: `slot${done ? ' is-done' : ''}${away ? ' is-away' : ''}`,
+    class: `tl-row${done ? ' is-done' : ''}${away ? ' is-away' : ''}`,
     onclick: () => go('overview', { studentId: student.id }),
   },
-  h('span', { class: 'slot-dot' }, done ? icon('check') : ''),
-  h('span', { class: 'slot-time' }, item.event.time),
-  h('span', {},
-    h('span', { class: 'slot-name' }, student.name, birthdayTag(student), away ? h('span', { class: 'slot-tag' }, item.event.change) : null),
-    h('span', { class: 'slot-meta' }, meta)),
-  icon('next', 'go'));
+  h('span', { class: 'tl-dot', 'aria-hidden': 'true' }, done ? icon('check') : ''),
+  h('span', { class: 'tl-main' },
+    h('span', { class: 'tl-who' },
+      h('span', { class: 'tl-time' }, event.time),
+      h('span', { class: 'tl-name' }, student.name, birthdayTag(student))),
+    h('span', { class: 'tl-meta' },
+      away ? h('span', { class: 'tl-tag' }, event.change) : null,
+      [...meta, state].filter(Boolean).join('・'),
+      !away && !done && !inClass && h('span', { class: `tl-plan${planned ? ' is-ready' : ''}` }, planned ? '已排課表' : '還沒排課表'))));
 }
 
-/** A lesson in the list. The two students of a 1:2 class stay together, each opening their own overview. */
-function slot(lesson) {
-  if (lesson.items.length === 1) return slotRow(lesson.items[0], lesson);
-  return h('div', { class: 'slot-pair', role: 'group', 'aria-label': `一對二 ${lesson.event.time}` }, lesson.items.map((item) => slotRow(item, lesson)));
+/**
+ * 今天的學生 (2026-11-25): every booking of today in one card beside the next class, in place of the 今天進度 and
+ * 還沒排課表 tiles. A 1:2 class keeps its two rows together.
+ */
+function todayList(lessons, span) {
+  const classes = lessons.filter((lesson) => !lesson.off);
+  const finished = classes.filter((lesson) => lesson.done).length;
+  return h('section', { class: `today-list rise ${span}` },
+    h('div', { class: 'tl-head' },
+      h('h2', { class: 'tile-title' }, '今天的學生'),
+      classes.length > 0 && h('span', { class: 'tl-progress' }, `完成 ${finished} / ${classes.length} 堂`)),
+    h('div', { class: 'tl-rows' }, lessons.map((lesson) => (lesson.items.length === 1
+      ? todayRow(lesson.items[0], lesson)
+      : h('div', { class: 'tl-pair', role: 'group', 'aria-label': `一對二 ${lesson.event.time}` },
+        h('span', { class: 'tl-pair-label', 'aria-hidden': 'true' }, '一對二'),
+        lesson.items.map((item) => todayRow(item, lesson)))))));
 }
 
 function welcome() {
@@ -178,18 +194,21 @@ export function todayView() {
     const student = studentForEvent(store.all('students'), e);
     return !(student && finished.has(`${student.id}|${e.date}`));
   });
+  const lessons = lessonsOf(readable.map((event) => describe(event, today)));
   // A class today without a plan simply starts from last time, so only later classes are listed as work to do.
-  const need = studentsNeedingPlan(upcoming.filter((e) => e.date > today), store.all('students'), store.all('plans'), today);
+  // A plan is used by the student's next class, so someone still to come today waits in today's list (planned or not)
+  // and moves onto the calendar once today's class is done; a plan written now would otherwise go to today's class.
+  const comingToday = new Set(lessons.flatMap((lesson) => lesson.present.filter((item) => !item.done).map((item) => item.student.id)));
+  const need = studentsNeedingPlan(upcoming.filter((e) => e.date > today && !comingToday.has(studentForEvent(store.all('students'), e)?.id)),
+    store.all('students'), store.all('plans'), today);
   const connected = isConnected();
   const demo = store.getMeta('demoLoaded');
   const noCalendar = connected && !chosenCalendars(store.getMeta('calendarIds'), store.getMeta('calendarId')).length;
   const status = currentStatus();
 
-  const lessons = lessonsOf(readable.map((event) => describe(event, today)));
   // A lesson with everyone on 病假 is listed but is not a class.
   const items = lessons.filter((lesson) => !lesson.off);
   const hero = items.find((lesson) => lesson.inClass) || items.find((lesson) => !lesson.done);
-  const others = lessons.filter((lesson) => lesson !== hero);
   const left = items.filter((lesson) => !lesson.done).length;
   const title = !lessons.length ? '今天' : left ? `今天還有 ${left} 堂` : items.length ? '今天都上完了' : '今天';
 
@@ -208,36 +227,70 @@ export function todayView() {
         h('p', {}, '選好存放預約的公司日曆，今天的預約就會出現。'),
         button('選擇日曆', () => tab('settings'), 'big primary')),
       hero && heroCard(hero, 'span-4'),
-      hero && h('div', { class: 'tiles span-2 rise' },
-        h('section', { class: 'tile' },
-          h('h2', { class: 'tile-title' }, '今天進度'),
-          ring(items.length ? Math.round(((items.length - left) / items.length) * 100) : 0),
-          h('p', { class: 'muted' }, `完成 ${items.length - left} / ${items.length} 堂`)),
-        need.length > 0
-          ? h('button', { type: 'button', class: 'tile tile-link', onclick: () => go('plan', { studentId: need[0].student.id }) },
-            h('span', { class: 'tile-title' }, '還沒排課表'),
-            h('span', { class: 'tile-number' }, need.length),
-            h('span', { class: 'muted' }, `先排 ${need[0].student.name}`))
-          : h('section', { class: 'tile' }, h('h2', { class: 'tile-title' }, '課表'), h('p', { class: 'muted' }, '接下來的課都排好了'))),
-      !hero && items.length > 0 && h('section', { class: 'empty rise span-6' }, reformer(), h('p', {}, need.length ? '辛苦了。接著可以排下次的課表。' : '辛苦了，今天的紀錄都存好了。')),
-      !items.length && !noCalendar && (connected || demo) && h('section', { class: 'empty rise span-6' }, reformer(), h('p', {}, lessons.length ? '今天的預約都請假了。' : '今天沒有你的預約。')),
+      !hero && items.length > 0 && h('section', { class: 'empty rise span-4' }, reformer(), h('p', {}, need.length ? '辛苦了。接著可以排下次的課表。' : '辛苦了，今天的紀錄都存好了。')),
+      !items.length && !noCalendar && (connected || demo) && h('section', { class: `empty rise ${lessons.length ? 'span-4' : 'span-6'}` }, reformer(), h('p', {}, lessons.length ? '今天的預約都請假了。' : '今天沒有你的預約。')),
+      lessons.length > 0 && todayList(lessons, 'span-2'),
       unreadable.length > 0 && h('p', { class: 'warn-text span-6' },
         `有 ${unreadable.length} 筆預約的標題讀不到學生姓名：${unreadable.map((e) => e.title).join('、')}`),
       unclear.length > 0 && h('p', { class: 'warn-text span-6' },
         `有 ${unclear.length} 筆預約分不出是哪一位同名的學生，請在日曆姓名後面加上生日：${[...new Set(unclear.map((e) => `${e.date.slice(5).replace('-', '/')} ${e.student}`))].join('、')}`),
-      others.length > 0 && h('section', { class: 'stack rise span-6' },
-        h('h2', { class: 'section-title' }, '今天的其他課'),
-        h('div', { class: 'timeline' }, others.map(slot))),
-      need.length > (hero ? 1 : 0) && h('section', { class: 'stack rise span-6' },
-        h('h2', { class: 'section-title' }, `還沒排課表（${need.length}）`),
-        h('div', { class: 'timeline' }, need.map(({ student, event }) => h('button', {
-          type: 'button',
-          class: 'slot',
-          onclick: () => go('plan', { studentId: student.id }),
-        },
-        h('span', { class: 'slot-dot task-dot' }, icon('plus')),
-        h('span', { class: 'slot-time' }, shortDate(event.date)),
-        h('span', {}, h('span', { class: 'slot-name' }, student.name, birthdayTag(student)), h('span', { class: 'slot-meta' }, `${event.time} 上課，按這裡排課表`)),
-        icon('next', 'go')))))),
+      need.length > 0 && planCalendar(need.map((item) => ({ ...item, count: laterCount(item, events, readable, today) })), today)),
     tabBar('today'));
+}
+
+const WEEK_LABELS = ['一', '二', '三', '四', '五', '六', '日'];
+
+function fullDay(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return `${m}/${d}（${'日一二三四五六'[new Date(y, m - 1, d).getDay()]}）`;
+}
+
+/** The day number in a calendar cell; the first cell and the 1st of a month also show the month. */
+function dayNumber(day, first) {
+  if (day.today) return '今天';
+  const [, m, d] = day.date.split('-').map(Number);
+  return first || d === 1 ? `${m}/${d}` : String(d);
+}
+
+/**
+ * Students booked but still without a plan, on a calendar (2026-11-25), so the week's planning shows at a glance.
+ * Each name opens its plan. On a phone the empty days drop out and it reads as a list of days.
+ */
+function planCalendar(need, today) {
+  const days = planCalendarWeeks(need, today).flat();
+  return h('section', { class: 'stack rise span-6' },
+    h('h2', { class: 'section-title' }, `還沒排課表（${need.length}）`),
+    h('div', { class: 'plan-cal' },
+      WEEK_LABELS.map((label) => h('span', { class: 'pc-head', 'aria-hidden': 'true' }, label)),
+      days.map((day, i) => h('div', {
+        class: `pc-day${day.past ? ' is-past' : ''}${day.today ? ' is-today' : ''}${day.items.length ? '' : ' is-empty'}`,
+      },
+      h('span', { class: 'pc-num', 'aria-hidden': 'true' }, dayNumber(day, i === 0)),
+      h('span', { class: 'pc-full', 'aria-hidden': 'true' }, fullDay(day.date)),
+      day.items.length > 0 && h('div', { class: 'pc-items' }, day.items.map(({ student, event, count }) => h('button', {
+        type: 'button',
+        class: 'pc-chip',
+        'aria-label': `${[fullDay(event.date), event.time, student.name, student.birthday, count ? `第 ${count.no} 堂` : ''].filter(Boolean).join(' ')}，排課表`,
+        onclick: () => go('plan', { studentId: student.id }),
+      },
+      h('span', { class: 'pc-time' }, event.time),
+      h('span', { class: 'pc-name' }, student.name, birthdayTag(student)),
+      count && h('span', { class: 'pc-count' }, `第 ${count.no} 堂`))))))));
+}
+
+/**
+ * Which class a booking on the calendar will be. A class today that is still to come goes first. The two students of a
+ * 1:2 class share one number, like on the day itself.
+ */
+function laterCount(item, events, todays, today) {
+  const students = store.all('students');
+  const sessions = store.all('sessions');
+  const countOf = (student) => laterClassNumber(student, sessions, today,
+    todays.some((e) => !e.change && studentForEvent(students, e)?.id === student.id));
+  const mine = countOf(item.student);
+  if (!item.event.group) return mine;
+  const partnerEvent = events.find((e) => e.group === item.event.group && e.date === item.event.date && !e.change && e !== item.event);
+  const partner = partnerEvent && studentForEvent(students, partnerEvent);
+  if (!partner || partner.id === item.student.id) return mine;
+  return pairClassNumber(mine, countOf(partner), !!item.student.classStart?.no, !!partner.classStart?.no);
 }

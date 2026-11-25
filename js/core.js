@@ -477,6 +477,21 @@ export function classLabel(no, size) {
   return no ? `第 ${no} / ${size} 堂` : '';
 }
 
+/**
+ * Which class a later booking will be (2026-11-25, for the 今日 calendar). It is the next number, moved on by one
+ * when a class today comes first and is not finished yet; after the last class of a term it starts again from 1.
+ * bookedToday: the student has a class today that is not on leave.
+ */
+export function laterClassNumber(student, sessions, today, bookedToday) {
+  const step = (count) => (count.no + 1 > count.size ? { no: 1, size: count.size } : { no: count.no + 1, size: count.size });
+  const open = sessions.find((s) => s.studentId === student.id && s.date === today && s.status !== 'done' && !s.deleted);
+  if (open?.classNo) return step({ no: open.classNo, size: open.packageSize || student.packageSize || PACKAGE_SIZES[0] });
+  const history = doneSessions(sessions, student.id);
+  const next = nextClassNumber(history, student);
+  const finishedToday = history.some((s) => s.date === today);
+  return (bookedToday || open) && !finishedToday ? step(next) : { no: next.no, size: next.size };
+}
+
 export function addDays(key, days) {
   const [y, m, d] = key.split('-').map(Number);
   return dateKey(new Date(y, m - 1, d + days));
@@ -647,7 +662,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v39';
+export const APP_VERSION = 'v40';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -747,6 +762,37 @@ export function studentsNeedingPlan(events, students, plans, today) {
     if (!plan || plan.used || !plan.rows || !plan.rows.length) result.push({ student, event });
   }
   return result;
+}
+
+/**
+ * 還沒排課表 on 今日 as a calendar (2026-11-25): whole weeks, Monday first, from this week to the week of the last
+ * booking still waiting for a plan. Each day lists those bookings by time; days before today are marked past.
+ */
+export function planCalendarWeeks(need, today) {
+  const parse = (key) => {
+    const [y, m, d] = key.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+  const mondayIndex = (date) => (date.getDay() + 6) % 7;
+  const start = parse(today);
+  start.setDate(start.getDate() - mondayIndex(start));
+  const lastDate = need.reduce((max, item) => (item.event.date > max ? item.event.date : max), today);
+  const end = parse(lastDate);
+  end.setDate(end.getDate() + 6 - mondayIndex(end));
+  const weeks = [];
+  for (const day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
+    if (!weeks.length || weeks[weeks.length - 1].length === 7) weeks.push([]);
+    const date = dateKey(day);
+    weeks[weeks.length - 1].push({
+      date,
+      past: date < today,
+      today: date === today,
+      items: need.filter((item) => item.event.date === date)
+        // A booking with no time goes last.
+        .sort((a, b) => (a.event.time || '99:99').localeCompare(b.event.time || '99:99')),
+    });
+  }
+  return weeks;
 }
 
 /**
