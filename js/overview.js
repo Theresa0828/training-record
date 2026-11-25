@@ -148,7 +148,33 @@ function editProfileSheet(student) {
 
     const others = store.all('students').filter((s) => s.id !== student.id);
     const hasRecords = store.all('sessions').some((s) => s.studentId === student.id);
-    const step = (no, title, help, ...body) => h('section', { class: 'pf-step' },
+    // A graduated student is archived, not deleted (2026-11-25): folded away in the 學生 list, every record kept.
+    // It is undone in one tap, so it needs no hold; the toast offers 復原 as well.
+    const archiveSection = () => {
+      const s = current();
+      const setArchived = (archived, archivedAt) => {
+        store.save('students', { ...(store.get('students', student.id) || s), archived, archivedAt, isNew: false });
+        refreshView();
+      };
+      const toggle = () => {
+        const was = { archived: !!s.archived, archivedAt: s.archivedAt || '' };
+        setArchived(!was.archived, was.archived ? '' : dateKey());
+        changed = false;
+        close();
+        toast(was.archived ? `已取消封存 ${s.name}` : `已封存 ${s.name}，在學生清單最下面`, {
+          label: '復原',
+          run: () => setArchived(was.archived, was.archivedAt),
+        });
+      };
+      return h('section', { class: 'pf-archive' },
+        h('div', { class: 'stack-xs' },
+          h('span', { class: 'pf-label' }, s.archived ? '已封存' : '畢業或停課'),
+          h('span', { class: 'muted small' }, s.archived
+            ? `${s.archivedAt ? `${shortDate(s.archivedAt)} 封存，` : ''}放在學生清單最下面的「已封存」。取消封存就回到清單。`
+            : '封存後在學生清單裡收起來，上課紀錄和照片都留著，隨時可以取消封存。')),
+        button(s.archived ? '取消封存' : '封存這位學生', toggle, ''));
+    };
+    const step =(no, title, help, ...body) => h('section', { class: 'pf-step' },
       h('span', { class: 'pf-no', 'aria-hidden': 'true' }, no),
       h('div', { class: 'pf-step-body' }, h('h3', { class: 'pf-title' }, title), help && h('p', { class: 'muted small' }, help), ...body));
     return h('div', { class: 'stack-lg profile-form' },
@@ -192,6 +218,7 @@ function editProfileSheet(student) {
             },
           });
         }, 'list-item'))),
+      archiveSection(),
       h('div', { class: 'stack' },
         button('刪除這位學生的所有紀錄', () => confirmSheet(
           `刪除 ${current().name}`,
@@ -561,7 +588,8 @@ export function overviewView({ studentId }) {
   return h('div', { class: 'screen has-action overview' },
     h('header', { class: 'topbar' },
       backButton(),
-      h('h1', {}, student.name, student.birthday ? h('small', { class: 'name-birthday' }, ` ${student.birthday}`) : null),
+      h('h1', {}, student.name, student.birthday ? h('small', { class: 'name-birthday' }, ` ${student.birthday}`) : null,
+        student.archived && h('span', { class: 'chip archived-chip' }, '已封存')),
       h('div', { class: 'topbar-actions' },
         history.length > 0 && button(`紀錄 ${history.length}`, () => historySheet(history), 'ghost', { 'aria-label': `過去紀錄，共 ${history.length} 堂` }),
         history.length > 0 && button('PDF', () => pdfSheet(student, history), 'ghost', { 'aria-label': '匯出 PDF' }),

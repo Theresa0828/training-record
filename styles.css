@@ -1280,6 +1280,13 @@ video.photo-img { object-fit: contain; background: #020300; }
 .pf-basis dd { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .input.pf-goal { font-size: 20px; min-height: 120px; }
 .pf-next { padding-top: 20px; border-top: 1px solid var(--line); }
+/* Archive a graduated student (2026-11-25): the text says what happens, the button sits beside it. */
+.pf-archive { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding-top: 20px; border-top: 1px solid var(--line); }
+.pf-archive .stack-xs { flex: 1 1 260px; min-width: 0; }
+.archived-chip { margin-left: 8px; vertical-align: middle; font-weight: 400; }
+.archive-fold { margin-top: 8px; }
+.archive-fold .fold-body { gap: 8px; }
+.archive-fold .slot { background: var(--bg); box-shadow: none; }
 @media (max-width: 560px) {
   .pf-body { grid-template-columns: minmax(0, 1fr); }
   .pf-figure { max-width: 260px; }

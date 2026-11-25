@@ -492,6 +492,18 @@ export function laterClassNumber(student, sessions, today, bookedToday) {
   return (bookedToday || open) && !finishedToday ? step(next) : { no: next.no, size: next.size };
 }
 
+/**
+ * The 學生 tab (2026-11-25): a graduated student is archived, folded away at the bottom with every record kept.
+ * A search looks through everyone, archived students included, so an old student is never lost.
+ */
+export function studentGroups(students, query = '') {
+  const text = query.trim();
+  const matches = students
+    .filter((s) => !s.deleted && (!text || s.name.includes(text)))
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+  return { active: matches.filter((s) => !s.archived), archived: matches.filter((s) => s.archived) };
+}
+
 export function addDays(key, days) {
   const [y, m, d] = key.split('-').map(Number);
   return dateKey(new Date(y, m - 1, d + days));
@@ -662,7 +674,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v40';
+export const APP_VERSION = 'v41';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
