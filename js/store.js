@@ -1,6 +1,6 @@
 // Keeps every record in memory for instant reads and writes through to IndexedDB in the background.
 import { SEED_EXERCISES, REMOVED_SEEDS, SEED_TAGS } from './seed.js';
-import { withTorsoGroup } from './core.js';
+import { withTorsoGroup, dueForPurge, stampFields } from './core.js';
 
 const REMOVED_IDS = new Set(REMOVED_SEEDS.map((exercise) => exercise.id));
 
@@ -29,6 +29,21 @@ const listeners = new Set();
 const saveErrorListeners = new Set();
 const pending = new Map();
 let flushTimer = null;
+// The last stored copy of each student, apart from the object the screens hold and may change in place, so a save
+// can tell which fields changed (2026-11-26: student details merge field by field).
+const studentCopies = new Map();
+const copyOf = (record) => JSON.parse(JSON.stringify(record));
+
+// Who is signed in (identity.js registers it): each change waiting for the cloud remembers them (2026-11-26, v47),
+// so on a shared iPad one teacher's changes never go up under the next one's login.
+let actorOf = () => '';
+export function setActorSource(source) {
+  actorOf = source;
+}
+
+function outboxItem(collection, id, at) {
+  return { id: `${collection}|${id}`, collection, recordId: id, at, by: actorOf() || '' };
+}
 
 export function onSaveError(listener) {
   saveErrorListeners.add(listener);
@@ -62,6 +77,7 @@ export async function loadStore() {
   await Promise.all(COLLECTIONS.map(async (name) => {
     for (const record of await readAll(name)) memory[name].set(record.id, name === 'exercises' ? withSeedTags(record) : record);
   }));
+  for (const student of memory.students.values()) studentCopies.set(student.id, copyOf(student));
   for (const item of await readAll('meta')) meta.set(item.id, item.value);
   for (const exercise of SEED_EXERCISES) {
     if (!memory.exercises.has(exercise.id)) memory.exercises.set(exercise.id, exercise);
@@ -159,16 +175,22 @@ export async function flush() {
 
 /** Saves a record locally and marks it to go to Drive. */
 export function save(collection, record) {
-  record.updatedAt = Date.now();
+  const now = Date.now();
+  if (collection === 'students') {
+    record.fieldAt = stampFields(studentCopies.get(record.id) || null, record, now);
+    studentCopies.set(record.id, copyOf(record));
+  }
+  record.updatedAt = now;
   memory[collection].set(record.id, record);
   queue(collection, JSON.parse(JSON.stringify(record)));
-  if (collection !== 'events') queue('outbox', { id: `${collection}|${record.id}`, collection, recordId: record.id, at: record.updatedAt });
+  if (collection !== 'events') queue('outbox', outboxItem(collection, record.id, record.updatedAt));
   flushSoon();
   for (const listener of listeners) listener(collection, record);
 }
 
 /** Stores a record from Drive without sending it back. */
 export function saveFromSync(collection, record) {
+  if (collection === 'students') studentCopies.set(record.id, copyOf(record));
   memory[collection].set(record.id, collection === 'exercises' ? withSeedTags(record) : record);
   queue(collection, record);
   flushSoon();
@@ -203,9 +225,28 @@ export function clearOutbox(items) {
   flushSoon();
 }
 
+/**
+ * Sends this iPad's copies again (2026-11-26, v47): the cloud asks when one of its files went missing or was put back
+ * from a backup. Only what `keep` allows (what the signed-in person may change) goes; the cloud keeps whichever copy
+ * is newer, so sending again never undoes anything.
+ */
+export function requeueAll(keep = () => true) {
+  let count = 0;
+  for (const collection of ['students', 'exercises', 'sessions', 'plans', 'options', 'photos']) {
+    for (const record of memory[collection].values()) {
+      if (record.demo || !record.updatedAt || !keep(collection, record)) continue;
+      queue('outbox', outboxItem(collection, record.id, Date.now()));
+      count += 1;
+    }
+  }
+  flushSoon();
+  return count;
+}
+
 /** Removes a record from this device only. Used for demo data, which never reaches Drive. */
 export function removeLocal(collection, id) {
   memory[collection].delete(id);
+  if (collection === 'students') studentCopies.delete(id);
   pending.set(`${collection}|${id}`, { store: collection, record: { id }, remove: true });
   pending.set(`outbox|${collection}|${id}`, { store: 'outbox', record: { id: `${collection}|${id}` }, remove: true });
   flushSoon();
@@ -215,24 +256,104 @@ export function subscribe(listener) {
   listeners.add(listener);
 }
 
-/** Erases a student everywhere: other devices and Drive receive empty records in place of the content. */
-export function eraseStudent(studentId) {
-  const stamp = (collection, record) => {
-    const erased = { id: record.id, deleted: true };
-    if (record.studentId) erased.studentId = record.studentId;
-    save(collection, erased);
+/** The student's records that go and come back with them. Records deleted on their own earlier stay as they are. */
+function recordsOf(studentId) {
+  const list = [];
+  for (const session of memory.sessions.values()) if (session.studentId === studentId) list.push(['sessions', session]);
+  // Each teacher's plan (2026-11-26); the plan from before colleagues is named by the student.
+  for (const plan of memory.plans.values()) if (plan.id === studentId || plan.studentId === studentId) list.push(['plans', plan]);
+  // Who taught them (2026-11-24); the record holds only the two ids.
+  for (const option of memory.options.values()) if (option.type === 'assign' && option.studentId === studentId) list.push(['options', option]);
+  for (const photo of memory.photos.values()) if (photo.studentId === studentId) list.push(['photos', photo]);
+  return list;
+}
+
+/**
+ * Deletes a student with every record of theirs (2026-11-25: only an admin, and it can be undone for 30 days).
+ * Nothing is cleared yet: each record is marked with the student and the moment, so restoreStudent brings back
+ * exactly these. Photos on Drive go to its trash on the next sync, which keeps them 30 days too.
+ */
+export function deleteStudent(studentId, by = '') {
+  const student = memory.students.get(studentId);
+  if (!student || student.deleted) return 0;
+  const at = Date.now();
+  for (const [collection, record] of recordsOf(studentId)) {
+    if (!record.deleted) save(collection, { ...record, deleted: true, deletedWith: studentId, deletedAt: at });
+  }
+  save('students', { ...student, deleted: true, deletedWith: studentId, deletedAt: at, deletedBy: by });
+  return at;
+}
+
+/** Brings a deleted student back with what was deleted with them. The cloud takes it only with restoredAt. */
+export function restoreStudent(studentId) {
+  const student = memory.students.get(studentId);
+  if (!student?.deleted || student.deletedWith !== studentId || student.purged) return false;
+  const at = student.deletedAt;
+  // Later than the deletion even when this iPad's clock runs behind the one that deleted.
+  const restoredAt = Math.max(Date.now(), (at || 0) + 1);
+  const back = (collection, record) => {
+    const { deletedWith, deletedAt, deletedBy, ...rest } = record;
+    save(collection, { ...rest, deleted: false, restoredAt });
   };
-  for (const session of memory.sessions.values()) {
-    if (session.studentId === studentId) stamp('sessions', session);
+  for (const [collection, record] of recordsOf(studentId)) {
+    if (record.deleted && record.deletedWith === studentId && record.deletedAt === at) back(collection, record);
   }
-  if (memory.plans.has(studentId)) stamp('plans', memory.plans.get(studentId));
-  for (const photo of memory.photos.values()) {
-    if (photo.studentId !== studentId || photo.deleted) continue;
-    // The Drive copy goes to the trash on the next sync; the file on this iPad goes now.
-    save('photos', { ...photo, deleted: true, erased: true });
-    removePhotoBlob(photo.id).catch(() => {});
+  back('students', student);
+  return true;
+}
+
+/**
+ * 30 days after a deletion its content is cleared on this iPad and, through the sync, everywhere. Only empty records
+ * stay, so an iPad that was offline cannot bring the content back.
+ */
+export function purgeStudent(studentId) {
+  const student = memory.students.get(studentId);
+  if (!student?.deleted || student.deletedWith !== studentId || student.purged) return;
+  const at = student.deletedAt;
+  for (const [collection, record] of recordsOf(studentId)) {
+    if (record.deletedWith !== studentId || record.deletedAt !== at || record.purged || collection === 'options') continue;
+    clearRecord(collection, record, studentId, at);
   }
-  if (memory.students.has(studentId)) stamp('students', memory.students.get(studentId));
+  save('students', { id: student.id, deleted: true, deletedWith: studentId, deletedAt: at, purged: true, deletedBy: student.deletedBy || '' });
+}
+
+/** What is left of one class, plan or photo once its student is cleared. */
+function clearRecord(collection, record, studentId, at) {
+  const empty = (extra = {}) => ({ id: record.id, deleted: true, deletedWith: studentId, deletedAt: at, purged: true, ...extra });
+  if (collection === 'sessions') save('sessions', empty({ studentId }));
+  else if (collection === 'plans') save('plans', empty(record.studentId ? { studentId: record.studentId, staffId: record.staffId } : {}));
+  else {
+    // The Drive copy is in its trash already, or goes there on the next sync.
+    save('photos', empty({ studentId, erased: true, driveId: record.driveId, driveTrashed: record.driveTrashed }));
+    removePhotoBlob(record.id).catch(() => {});
+  }
+}
+
+/**
+ * A class, plan or photo saved on an iPad that had not heard of the deletion yet reaches the others after it. It goes
+ * with the student: back on a restore, cleared with the rest; after the 30 days it is cleared on the next pass, once
+ * the cloud has it as deleted. A record restored after the deletion is left alone, the student's restore is on its way.
+ * `mayChange` leaves out what the person on this iPad may not change (another teacher's class): its own iPad, or an
+ * admin's, hides it, so the cloud does not refuse this one again at every sync.
+ */
+export function followDeletions(mayChange = () => true) {
+  for (const student of memory.students.values()) {
+    if (!student.deleted || student.deletedWith !== student.id) continue;
+    const at = student.deletedAt;
+    for (const [collection, record] of recordsOf(student.id)) {
+      if (record.purged) continue;
+      if (!record.deleted) {
+        if ((Number(record.restoredAt) || 0) <= (at || 0) && mayChange(collection, record)) save(collection, { ...record, deleted: true, deletedWith: student.id, deletedAt: at });
+      } else if (student.purged && record.deletedWith === student.id && collection !== 'options') {
+        clearRecord(collection, record, student.id, at);
+      }
+    }
+  }
+}
+
+export function purgeExpired(now = Date.now(), mayChange = undefined) {
+  followDeletions(mayChange);
+  for (const student of dueForPurge([...memory.students.values()], now)) purgeStudent(student.id);
 }
 
 function readOne(name, id) {

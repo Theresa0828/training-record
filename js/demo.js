@@ -108,7 +108,7 @@ export function loadDemo() {
     return row;
   };
   store.saveFromSync('sessions', session('demo_b1', 'demo_s2', dayOffset(-5), 'pilates', [
-    pilatesRow(DEMO_PILATES[0], '2r1b m', 10), pilatesRow(DEMO_PILATES[1], '1r1b', 10),
+    pilatesRow(DEMO_PILATES[0], '2r1b', 10), pilatesRow(DEMO_PILATES[1], '1r1b', 10),
     pilatesRow(DEMO_PILATES[2], '1r1y', 8), pilatesRow(DEMO_PILATES[3], '', 6),
   ], { classNo: 23, packageSize: 24 }));
 

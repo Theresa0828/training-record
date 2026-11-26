@@ -5,7 +5,8 @@ import * as store from './store.js';
 import {
   MAX_SETS, DEFAULT_TAGS, DEFAULT_PROPS, chooserOptions, painList, painText, painShort, setPainMap, setText, rowDetails, exerciseHistory, exerciseTrend, ASSIST_LEVELS, dateKey, newId, makeRow, makeSet,
   doneSessions, startingRows, isBpFlagged, expectedDigits, resolveStaleDraft, swapRow, commonSprings, nextClassNumber, classLabel, moveRow, setLoad, equipmentText, BAND, effortLevel,
-  bookingFrom, partnerFor, pairClassNumber, planForPartner, rowsFromSession,
+  bookingFrom, partnerFor, pairClassNumber, planForPartner, rowsFromSession, classTeacherId, classCountFor, termFor, termFields, ownHistory, planIdFor,
+  STATUS_DETAILS, statusDetail, statusText,
 } from './core.js';
 import { kindLabel } from './today.js';
 import { exercisePicker, rememberSwaps } from './library.js';
@@ -24,6 +25,7 @@ import { equipmentControl } from './equipment.js';
 import { paramTile } from './param.js';
 import { captureForExercise } from './photos.js';
 import { rowMedia } from './core.js';
+import { me, team, mine, myPlan, myPlanId, notMineClassView } from './team.js';
 
 const SET_NAMES = ['一', '二', '三', '四', '五'];
 const STATUS_FLAGS = [['pain', '疼痛'], ['sleep', '睡眠'], ['diet', '飲食'], ['mood', '心情']];
@@ -47,28 +49,35 @@ export function todayPair(studentId) {
  * The count runs by itself. Classes opened before it did get their number the first time they open.
  * A 1:2 class counts for both (2026-11-24): the partner's number today when they opened first, otherwise the larger
  * of the two counts, so a class one of them missed still counts for the pair.
+ * A student who counts each teacher separately (2026-11-25 sixth form) gets this teacher's own number and term size.
  */
 function giveClassNumber(session, student) {
   if (session.classNo) return;
+  const staff = team();
+  const teacher = classTeacherId(session, staff);
+  const sameTeacher = (s) => classTeacherId(s, staff) === teacher;
   const history = doneSessions(store.all('sessions'), session.studentId).filter((s) => s.id !== session.id);
-  let { no, size } = nextClassNumber(history, student);
+  let { no, size } = classCountFor(history, student, teacher, staff);
+  const term = termFor(student, teacher, staff);
   const partner = session.pairWith ? store.get('students', session.pairWith) : null;
   if (partner) {
-    const theirs = store.all('sessions').find((s) => s.studentId === partner.id && s.date === session.date && s.classNo);
+    const theirs = store.all('sessions').find((s) => s.studentId === partner.id && s.date === session.date && s.classNo && sameTeacher(s));
     ({ no, size } = theirs ? { no: theirs.classNo, size: theirs.packageSize }
-      : pairClassNumber({ no, size }, nextClassNumber(doneSessions(store.all('sessions'), partner.id), partner), !!student?.classStart?.no, !!partner.classStart?.no));
+      : pairClassNumber({ no, size }, classCountFor(doneSessions(store.all('sessions'), partner.id), partner, teacher, staff),
+        !!term.classStart?.no, !!termFor(partner, teacher, staff).classStart?.no));
   }
   session.classNo = no;
   session.packageSize = size;
   // A number set by hand is for one class only; after that the count carries on from it.
-  if (student?.classStart) store.save('students', { ...student, classStart: null, packageSize: size });
+  if (student && term.classStart) store.save('students', { ...student, ...termFields(student, teacher, staff, { classStart: null, packageSize: size }) });
 }
 
 /** Opens today's session for the student, or starts one from the plan or the last class. */
 export function openSession(studentId, kind) {
   const today = dateKey();
   const student = store.get('students', studentId);
-  const existing = store.all('sessions').find((s) => s.studentId === studentId && s.date === today);
+  // Another teacher's class today stays theirs (2026-11-26): this teacher opens their own.
+  const existing = store.all('sessions').find((s) => s.studentId === studentId && s.date === today && mine(s));
   if (existing) {
     if (!existing.classNo) {
       giveClassNumber(existing, student);
@@ -76,14 +85,20 @@ export function openSession(studentId, kind) {
     }
     return existing;
   }
-  const history = doneSessions(store.all('sessions'), studentId);
-  const plan = store.get('plans', studentId);
+  // Opened from the overview, the kind comes from today's booking on this teacher's calendar (2026-11-26: a Pilates
+  // teacher's first class with a strength student is Pilates).
+  const booking = bookingFrom(store.all('events'), store.all('students'), studentId, today);
+  kind = kind || (booking?.date === today ? booking.kind : '');
+  // Each teacher starts from their own plan and their own last class (2026-11-26).
+  const history = ownHistory(doneSessions(store.all('sessions'), studentId), team(), me(), kind);
+  const plan = myPlan(studentId);
   const partner = todayPair(studentId)?.partner;
   let rows = startingRows(plan, history);
   // A new student in a 1:2 class starts from the partner's exercises today, so the list is not built twice.
   if (!rows.length && partner) {
-    const theirs = store.all('sessions').find((s) => s.studentId === partner.id && s.date === today && !s.deleted);
-    rows = planForPartner(theirs ? rowsFromSession(theirs) : startingRows(store.get('plans', partner.id), doneSessions(store.all('sessions'), partner.id)), history).rows;
+    const theirs = store.all('sessions').find((s) => s.studentId === partner.id && s.date === today && mine(s));
+    const partnerHistory = ownHistory(doneSessions(store.all('sessions'), partner.id), team(), me(), kind);
+    rows = planForPartner(theirs ? rowsFromSession(theirs) : startingRows(store.get('plans', myPlanId(partner.id)), partnerHistory), history).rows;
   }
   const session = {
     id: newId('ses'),
@@ -100,10 +115,15 @@ export function openSession(studentId, kind) {
     note: '',
     coachSigned: false,
     studentSignature: null,
-    fromPlan: !!(plan && !plan.used && plan.rows?.length),
+    // A plan holding only this class's small goal is used up by this class too (2026-11-26).
+    fromPlan: !!(plan && !plan.used && (plan.rows?.length || plan.classGoal)),
   };
+  // 本堂小目標 (2026-11-26): written when planning, shown in class and on the student's report.
+  if (plan && !plan.used && plan.classGoal?.trim()) session.classGoal = plan.classGoal.trim();
   if (student?.demo) session.demo = true;
   if (partner) session.pairWith = partner.id;
+  // Who taught it (2026-11-24): the record's teacher and signature, and later who may change the class.
+  if (me()) session.staffId = me().id;
   giveClassNumber(session, student);
   store.save('sessions', session);
   return session;
@@ -114,7 +134,8 @@ export function finishSession(session) {
   session.status = 'done';
   session.finishedAt = session.finishedAt || new Date().toISOString();
   store.save('sessions', session);
-  const plan = store.get('plans', session.studentId);
+  const staff = team();
+  const plan = store.get('plans', planIdFor(session.studentId, classTeacherId(session, staff), staff));
   if (session.fromPlan && plan && !plan.used) store.save('plans', { ...plan, used: true });
   rememberSwaps(session.rows, session.demo);
 }
@@ -123,6 +144,8 @@ export function finishSession(session) {
 export function settleOldDrafts() {
   const today = dateKey();
   for (const session of store.all('sessions')) {
+    // Another teacher's open class is closed on their own iPad (2026-11-26).
+    if (!mine(session)) continue;
     const action = resolveStaleDraft(session, today);
     if (action === 'finish') finishSession(session);
     if (action === 'discard') store.save('sessions', { ...session, deleted: true });
@@ -135,6 +158,7 @@ export function recordView({ studentId, kind, sessionId }) {
   // 存檔上傳 stores it once and sends it at once, so Drive never gets half-finished versions.
   const original = sessionId ? store.get('sessions', sessionId) : null;
   const editing = !!original && original.date !== dateKey();
+  if (editing && !mine(original)) return notMineClassView(original);
   let session = editing ? JSON.parse(JSON.stringify(original)) : openSession(studentId, kind);
   let dirty = false;
   let uploadState = 'clean';
@@ -486,8 +510,8 @@ export function recordView({ studentId, kind, sessionId }) {
     vitalsFlags.replaceChildren(h('span', { class: 'vital-label' }, '今天狀況'),
       h('span', { class: 'vital-value' }, marked.length ? marked.join('、') : '都正常'));
     noteButton.classList.toggle('is-marked', false);
-    noteButton.replaceChildren(h('span', { class: 'vital-label' }, '備註'),
-      h('span', { class: 'vital-value' }, session.note || session.special ? '已寫' : '點這裡寫'));
+    noteButton.replaceChildren(h('span', { class: 'vital-label' }, '小目標・備註'),
+      h('span', { class: 'vital-value' }, session.classGoal?.trim() || session.note || session.special ? '已寫' : '點這裡寫'));
   }
 
   /** Says in one sentence what to do now, so the screen never leaves the teacher guessing. */
@@ -620,7 +644,9 @@ export function recordView({ studentId, kind, sessionId }) {
   /** The panel's first line: the exercise, the two tabs, and its own buttons, all on one row to leave room for the list. */
   function panelTop(row, sub, tools) {
     return h('div', { class: 'panel-top' },
-      h('div', { class: 'panel-title' }, h('strong', {}, row.name), sub && h('span', { class: 'muted' }, sub)),
+      h('div', { class: 'panel-title' }, h('strong', {}, row.name), sub && h('span', { class: 'muted' }, sub),
+        // The note written for it when planning (2026-11-26).
+        String(row.planNote || '').trim() && h('span', { class: 'panel-note' }, row.planNote.trim())),
       panelTabs(),
       tools && h('div', { class: 'panel-tools' }, tools));
   }
@@ -771,11 +797,14 @@ export function recordView({ studentId, kind, sessionId }) {
           h('div', { class: 'chips chips-4' }, STATUS_FLAGS.map(([flag, label]) => (flag === 'pain'
             ? button(painList(session.dayPain || {}).length ? `疼痛 ${painShort(session.dayPain)}` : label, () => openDayPain(draw),
               `chip-btn${session.flags.pain ? ' is-pain' : ''}`, { 'aria-pressed': session.flags.pain ? 'true' : 'false' })
-            : button(label, () => {
-              mutate(() => { session.flags[flag] = !session.flags[flag]; });
-              paintVitals();
-              draw();
-            }, 'chip-btn', { 'aria-pressed': session.flags[flag] ? 'true' : 'false' }))))));
+            : button(label, () => openStatusSheet(flag, label, draw), 'chip-btn', { 'aria-pressed': session.flags[flag] ? 'true' : 'false' })))),
+          statusLine()));
+    }
+
+    /** What was picked for 睡眠、飲食、心情, under the four checks, so the details show without opening them. */
+    function statusLine() {
+      const lines = ['sleep', 'diet', 'mood'].filter((key) => session.flags[key]).map((key) => statusText(session, key)).filter((text) => text.includes('（'));
+      return lines.length > 0 && h('p', { class: 'muted small status-details' }, lines.join('　'));
     }
 
     function key(digit) {
@@ -912,6 +941,77 @@ export function recordView({ studentId, kind, sessionId }) {
     });
   }
 
+  /**
+   * 睡眠、飲食、心情 in detail (2026-11-26, 各自可以再點進去選取細節和輸入備註). The tap marks it at once, as before,
+   * and opens what to pick and a note; 取消標記 takes the mark and its details off (held when there are details).
+   */
+  function openStatusSheet(flag, label, after) {
+    if (!session.flags[flag]) {
+      mutate(() => { session.flags[flag] = true; });
+      paintVitals();
+      after();
+    }
+    openSheet(`今天的${label}`, (close) => {
+      const status = h('p', { class: 'muted small', role: 'status' }, `已標記${label}有狀況。改了會自動儲存。`);
+      const saved = () => { status.textContent = '已自動儲存'; };
+      const chips = h('div', { class: 'chips' });
+      const note = h('textarea', { class: 'input', placeholder: '其他要記的，例如：昨晚加班到很晚', 'aria-label': `${label}的備註` });
+      note.value = statusDetail(session, flag).note;
+      const write = (items, text) => {
+        session.flagDetails = { ...(session.flagDetails || {}), [flag]: { items, note: text } };
+      };
+      const paint = () => {
+        const picked = statusDetail(session, flag).items;
+        chips.replaceChildren(...[...new Set([...STATUS_DETAILS[flag], ...picked])].map((item) => button(item, () => {
+          const items = statusDetail(session, flag).items;
+          const at = items.indexOf(item);
+          if (at === -1) items.push(item);
+          else items.splice(at, 1);
+          mutate(() => write(items, note.value));
+          saved();
+          paint();
+          paintVitals();
+        }, 'chip-btn', { 'aria-pressed': picked.includes(item) ? 'true' : 'false' })));
+        paintUnmark();
+      };
+      note.addEventListener('input', () => {
+        write(statusDetail(session, flag).items, note.value);
+        persist();
+        saved();
+        paintUnmark();
+      });
+      const unmark = () => {
+        mutate(() => {
+          session.flags[flag] = false;
+          if (session.flagDetails) {
+            session.flagDetails = { ...session.flagDetails };
+            delete session.flagDetails[flag];
+          }
+        });
+        close();
+      };
+      // Once something is picked or written, taking the mark off also takes that away, so it needs the held button.
+      const unmarkSlot = h('div', { class: 'stack' });
+      let held = null;
+      function paintUnmark() {
+        const detail = statusDetail(session, flag);
+        const hold = !!(detail.items.length || detail.note);
+        if (hold === held) return;
+        held = hold;
+        unmarkSlot.replaceChildren(hold
+          ? holdButton('取消標記', () => { unmark(); toast(`已取消${label}的標記`, { label: '復原', run: undo }); }, 'ghost')
+          : button(`${label}沒問題，取消標記`, unmark, 'ghost'));
+      }
+      paint();
+      return h('div', { class: 'stack' },
+        status,
+        chips,
+        h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '備註'), note),
+        button('完成', close, 'big primary'),
+        unmarkSlot);
+    }, { onClose: () => { paintVitals(); after(); } });
+  }
+
   /** This student's earlier classes with this exercise, so the last numbers are one tap away. */
   function openExerciseHistory(row) {
     const history = doneSessions(store.all('sessions'), session.studentId).filter((s) => s.id !== session.id);
@@ -968,21 +1068,28 @@ export function recordView({ studentId, kind, sessionId }) {
   }
 
   function openNoteSheet() {
-    openSheet('備註', (close) => {
+    openSheet('小目標與備註', (close) => {
+      const goal = h('textarea', { class: 'input class-goal-input', placeholder: '例：深蹲時膝蓋對準腳尖', 'aria-label': '本堂小目標，學生看得到' });
+      goal.value = session.classGoal || '';
       const special = h('input', { class: 'input', value: session.special || '', placeholder: '特殊狀況', 'aria-label': '特殊狀況' });
-      const note = h('textarea', { class: 'input note-area', 'aria-label': '備註' });
+      const note = h('textarea', { class: 'input note-area', 'aria-label': '備註', placeholder: '備註' });
       note.value = session.note || '';
       const save = () => {
+        session.classGoal = goal.value;
         session.special = special.value;
         session.note = note.value;
         persist();
         paintVitals();
+        paintBanner();
       };
+      goal.addEventListener('input', save);
       special.addEventListener('input', save);
       note.addEventListener('input', save);
       return h('div', { class: 'stack' },
-        h('p', { class: 'muted' }, '可以直接用 Apple Pencil 在框內手寫，iPad 會轉成文字。'),
-        special, note, button('完成', close, 'big primary'));
+        h('p', { class: 'muted' }, '改了會自動儲存。可以直接用 Apple Pencil 在框內手寫，iPad 會轉成文字。'),
+        h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '本堂小目標（學生看得到）'), goal),
+        h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '特殊狀況和備註（學生看不到）'), special, note),
+        button('完成', close, 'big primary'));
     });
   }
 
@@ -1011,7 +1118,7 @@ export function recordView({ studentId, kind, sessionId }) {
         store.save('students', { ...store.get('students', studentId), nextNotes: notes.value, isNew: false });
         close();
         // In a 1:2 class the other student comes next, unless they are finished already.
-        const next = pair && !store.all('sessions').some((s) => s.studentId === pair.partner.id && s.date === session.date && s.status === 'done') ? pair.partner : null;
+        const next = pair && !store.all('sessions').some((s) => s.studentId === pair.partner.id && s.date === session.date && s.status === 'done' && mine(s)) ? pair.partner : null;
         toast(next ? `${student.name} 的紀錄已儲存，接著是 ${next.name}` : `${student.name} 的紀錄已儲存`);
         home();
         if (showReport) go('report', { studentId, sessionId: session.id });
@@ -1021,6 +1128,20 @@ export function recordView({ studentId, kind, sessionId }) {
   }
 
   buildGrid();
+
+  // 禁忌 and 注意 from the profile, and this class's small goal (2026-11-26), which can change in 小目標與備註.
+  const banner = h('div', { class: 'banner' });
+  function paintBanner() {
+    const warn = student.contraindications || student.nextNotes;
+    const goal = String(session.classGoal || '').trim();
+    banner.hidden = !warn && !goal;
+    banner.replaceChildren(icon(warn ? 'warn' : 'star'),
+      h('div', {},
+        student.contraindications && h('p', {}, `禁忌：${student.contraindications}`),
+        student.nextNotes && h('p', {}, `注意：${student.nextNotes}`),
+        goal && h('p', { class: 'banner-goal' }, `小目標：${goal}`)));
+  }
+  paintBanner();
 
   const screen = h('div', { class: 'screen record' },
     h('header', { class: `topbar${pair ? ' is-pair' : ''}` },
@@ -1033,11 +1154,7 @@ export function recordView({ studentId, kind, sessionId }) {
         button('總覽', () => leave(() => go('overview', { studentId })), 'ghost'),
         undoButton,
         finishButton)),
-    (student.contraindications || student.nextNotes) && h('div', { class: 'banner' },
-      icon('warn'),
-      h('div', {},
-        student.contraindications && h('p', {}, `禁忌：${student.contraindications}`),
-        student.nextNotes && h('p', {}, `注意：${student.nextNotes}`))),
+    banner,
     h('div', { class: 'vitals' }, vitalsBp, vitalsHr, vitalsFlags, noteButton),
     guideText,
     h('div', { class: 'record-main' },
@@ -1067,7 +1184,7 @@ export function recordView({ studentId, kind, sessionId }) {
  * A check marks a student already finished today.
  */
 function pairSwitch(pair, student, session) {
-  const finished = (id) => store.all('sessions').some((s) => s.studentId === id && s.date === session.date && s.status === 'done');
+  const finished = (id) => store.all('sessions').some((s) => s.studentId === id && s.date === session.date && s.status === 'done' && mine(s));
   const name = (who, current) => h('button', {
     type: 'button',
     class: 'pair-name',

@@ -1,18 +1,16 @@
 // Choosing springs by color, so no keyboard ever opens. Used in class and when planning.
 // Each apparatus shows its own springs (2026-11-13): Reformer, Chair and Cadillac differ.
+// No apparatus has a bar position any more (Reformer's low/middle/high went on 2026-11-26).
 import { h, button } from './dom.js';
-import { SPRING_WORDS, springKind, springSet, springFromText, springToText } from './core.js';
+import { SPRING_WORDS, springSet, springFromText, springToText } from './core.js';
 
-const POSITION_NAMES = { reformer: { l: '低 l', m: '中 m', h: '高 h' } };
-const POSITION_LABEL = { reformer: '彈簧位置' };
 // Chair: every colour hangs in its own hole (2026-11-16).
 const HOLE_NAMES = { T: '頂', H: '高', M: '中', L: '低' };
 
 const empty = () => ({ counts: {}, holes: {}, bar: '' });
 
-/** Returns the controls for one spring setting. onChange gets the new text, such as "1r1b m" or "1kT 1gL". */
+/** Returns the controls for one spring setting. onChange gets the new text, such as "1r1b" or "1kT 1gL". */
 export function springEditor(text, onChange, presets = [], apparatus = 'Reformer') {
-  const kind = springKind(apparatus);
   const set = springSet(apparatus);
   const spring = springFromText(text);
   // A setting from another apparatus keeps only what this one has.
@@ -27,9 +25,7 @@ export function springEditor(text, onChange, presets = [], apparatus = 'Reformer
   return h('div', { class: 'spring-editor' },
     h('div', { class: 'spring-top' },
       h('div', { class: 'spring-value', 'aria-label': `目前彈簧 ${shown || '未設定'}` }, shown || '未設定'),
-      h('div', { class: 'spring-bars', role: 'group', 'aria-label': POSITION_LABEL[kind] || '彈簧' },
-        set.positions.length > 0 && h('span', { class: 'muted small' }, POSITION_LABEL[kind]),
-        set.positions.map((bar) => button(POSITION_NAMES[kind]?.[bar] || bar, () => { spring.bar = spring.bar === bar ? '' : bar; send(); }, 'chip-btn', { 'aria-pressed': spring.bar === bar ? 'true' : 'false' })),
+      h('div', { class: 'spring-bars' },
         button('清除', () => onChange(springToText(empty(), apparatus)), 'chip-btn')),
       presets.length > 0 && h('div', { class: 'spring-presets', role: 'group', 'aria-label': '常用組合' },
         presets.map((preset) => button(preset, () => onChange(preset), 'chip-btn', { 'aria-pressed': preset === text ? 'true' : 'false' })))),

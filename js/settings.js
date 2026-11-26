@@ -2,10 +2,12 @@ import { APP_VERSION, chosenCalendars, CALENDAR_KINDS, guessCalendarKind } from 
 import { h, button, tabBar, confirmSheet, openSheet, refreshView, toast } from './dom.js';
 import * as store from './store.js';
 import { icon } from './icons.js';
-import { call, currentStatus, isConnected, parsePairingCode, photosWaitingForScript, syncNow } from './sync.js';
+import { call, currentStatus, isConnected, parsePairingCode, photosWaitingForScript, syncNow, countWaiting, waitingTotal } from './sync.js';
 import { recordStatus, recordStatusText } from './fullrecord.js';
 import { signaturePad } from './record.js';
 import { loadDemo, clearDemo } from './demo.js';
+import { teamSection, signInWithCode, showingFreshCode } from './team.js';
+import { forgetLogin } from './identity.js';
 
 export const DEFAULT_PALETTE = 'mint';
 export const PALETTES = [
@@ -75,23 +77,40 @@ function connectSection() {
       h('p', { class: `status${recordStatus().problem ? ' warn' : ''}`, 'data-record-status': true }, recordStatusText()),
       (photosWaitingForScript() > 0 || recordStatus().scriptOld) && scriptUpdateHelp(),
       h('div', { class: 'row-wrap' },
-        button('立即同步', () => syncNow(), 'primary'),
+        // While the admin's new login code shows below, copying it is the one main button (2026-11-25).
+        button('立即同步', () => syncNow(), showingFreshCode() ? '' : 'primary'),
         button('選擇日曆', loadCalendars, ''),
         /^https:\/\/drive\.google\.com\//.test(recordStatus().folderUrl) && button('打開完整紀錄', () => window.open(recordStatus().folderUrl, '_blank', 'noopener'), ''),
-        button('中斷連線', () => confirmSheet('中斷連線', '這台裝置將不再同步。紀錄仍會留在這台裝置和 Google 雲端。', '中斷連線', () => {
-          store.setMeta('connection', null);
-          refreshView();
-        }), 'ghost')),
+        button('中斷連線', async () => {
+          // Records not yet up stay only here once disconnected (2026-11-26), so say how many first.
+          const left = waitingTotal(await countWaiting());
+          confirmSheet('中斷連線', left
+            ? `這台 iPad 還有 ${left} 筆紀錄沒上傳到雲端。中斷連線後會先留在這台，重新連線才會上傳；這段時間 iPad 壞掉或清除資料就會不見。建議先按「立即同步」。`
+            : '這台裝置將不再同步。紀錄仍會留在這台裝置和 Google 雲端。', '中斷連線', () => {
+            store.setMeta('connection', null);
+            refreshView();
+          });
+        }, 'ghost')),
     ] : [
-      h('p', { class: 'muted' }, '依照「設定步驟」在 Google Apps Script 取得配對碼，貼到下面。'),
+      h('p', { class: 'muted' }, '貼上管理者寄來的整封信，或依照「設定步驟」在 Google Apps Script 取得的配對碼。'),
       code,
       button('連線', async () => {
         try {
-          store.setMeta('connection', parsePairingCode(code.value));
+          // A colleague's letter also carries their login, so one paste pairs this device and signs them in.
+          const { staff: invite, ...conn } = parsePairingCode(code.value);
+          store.setMeta('connection', conn);
           message.textContent = '測試連線中';
           const result = await call('ping');
           clearDemo();
-          toast(`已連上 ${result.email || 'Google'}，示範資料已清除`);
+          let welcome = '';
+          if (invite?.code) {
+            const signed = await signInWithCode(invite.code, true);
+            if (signed.reason === 'ok') welcome = `，歡迎${signed.staff.name}`;
+            else forgetLogin(signed.reason === 'error' || signed.reason === 'offline' ? 'missing' : signed.reason);
+          } else if (result.team) {
+            forgetLogin('missing');
+          }
+          toast(`已連上 ${result.email || 'Google'}${welcome}，示範資料已清除`);
           refreshView();
         } catch (error) {
           store.setMeta('connection', null);
@@ -181,6 +200,6 @@ function dataSection() {
 export function settingsView() {
   return h('div', { class: 'screen has-tabs' },
     h('header', { class: 'topbar page-title' }, h('h1', {}, '設定')),
-    h('main', { class: 'page stack' }, connectSection(), signatureSection(), paletteSection(), dataSection()),
+    h('main', { class: 'page stack' }, connectSection(), teamSection(), signatureSection(), paletteSection(), dataSection()),
     tabBar('settings'));
 }

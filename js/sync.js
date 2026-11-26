@@ -1,6 +1,7 @@
 // Talks to the Apps Script on the teacher's Google account. Runs only in the background.
 import * as store from './store.js';
-import { mergeRecords, fileForRecord, collectionForFile, bookingsFromEvent, keepSampleBookings, dateKey, chosenCalendars, mergeCalendarEvents, photoFileName, mediaFolderName, mediaExtension, isVideo } from './core.js';
+import { mergeRecords, mergeStudent, sameStudent, fileForRecord, collectionForFile, bookingsFromEvent, keepSampleBookings, dateKey, chosenCalendars, mergeCalendarEvents, photoFileName, mediaFolderName, mediaExtension, isVideo, decodePairing, sendsNow, waitingSummary, othersWaitingText, staffList, newId, APP_VERSION, LATE_UPLOAD_MS } from './core.js';
+import { currentLogin, updateLogin, forgetLogin, loginRequiredReason } from './identity.js';
 
 const statusListeners = new Set();
 let status = { state: 'idle', message: '' };
@@ -42,24 +43,23 @@ export function isConnected() {
   return !!connection();
 }
 
-/** Reads the code that showPairingCode printed. */
+/**
+ * Reads the code that showPairingCode printed, or the whole letter an admin sent a colleague (2026-11-25), which also
+ * carries that colleague's login as `staff`.
+ */
 export function parsePairingCode(code) {
-  const cleaned = String(code).trim().replace(/^.*?([A-Za-z0-9_-]{40,}={0,2}).*$/s, '$1');
-  let value;
-  try {
-    const binary = atob(cleaned.replace(/-/g, '+').replace(/_/g, '/'));
-    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-    value = JSON.parse(new TextDecoder().decode(bytes));
-  } catch {
-    throw new Error('配對碼格式不對');
-  }
-  if (!value?.url || !value?.key) throw new Error('配對碼格式不對');
+  const value = decodePairing(code);
+  if (!value) throw new Error('配對碼格式不對');
   return value;
 }
 
-export async function call(action, payload = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
-  const conn = connection();
-  if (!conn) throw new Error('尚未連線 Google');
+// Called when the cloud stops accepting this device's login (disabled, a new code, or colleagues just started).
+const loginLostListeners = new Set();
+export function onLoginLost(listener) {
+  loginLostListeners.add(listener);
+}
+
+async function post(conn, body, timeoutMs) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let response;
@@ -69,46 +69,215 @@ export async function call(action, payload = {}, timeoutMs = REQUEST_TIMEOUT_MS)
       method: 'POST',
       // text/plain keeps this a simple request, which Apps Script can answer across origins.
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ key: conn.key, action, ...payload }),
+      body: JSON.stringify(body),
       redirect: 'follow',
       signal: controller.signal,
     });
     text = await response.text();
   } catch (error) {
-    throw new Error(controller.signal.aborted ? 'Google 太久沒回應' : '連不上 Google，請確認網路，或部署時「誰可以存取」是否選「所有人」');
+    const offline = new Error(controller.signal.aborted ? 'Google 太久沒回應' : '連不上 Google，請確認網路，或部署時「誰可以存取」是否選「所有人」');
+    offline.network = true;
+    throw offline;
   } finally {
     clearTimeout(timeout);
   }
   if (!response.ok) throw new Error(`Google 回應錯誤（${response.status}）`);
-  let data;
   try {
-    data = JSON.parse(text);
+    return JSON.parse(text);
   } catch (error) {
     throw new Error('Google 沒有回傳資料，請確認部署時「誰可以存取」是否選「所有人」');
   }
-  if (!data.ok) throw new Error(data.error === 'unauthorized' ? '配對碼已失效，請重新配對' : data.error);
-  return data;
 }
 
+/**
+ * One request to the Apps Script. Once colleagues share the app every request carries the signed-in colleague's
+ * code, and the script refuses a missing, wrong or disabled one (2026-11-25, part 2).
+ */
+export async function call(action, payload = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const conn = connection();
+  if (!conn) throw new Error('尚未連線 Google');
+  const login = currentLogin();
+  const send = (code) => post(conn, { key: conn.key, action, ...payload, ...(login && code ? { staff: { id: login.id, code } } : {}) }, timeoutMs);
+  let data = await send(login?.code);
+  // A new code of one's own that has not reached the cloud yet, or reached it before this device knew: try the other.
+  if (!data.ok && data.error === 'login' && login?.next) {
+    const retry = await send(login.next);
+    if (retry.ok) updateLogin({ code: login.next, next: null });
+    data = retry;
+  }
+  if (data.ok) {
+    if (!login && loginRequiredReason() && action !== 'ping') store.setMeta('loginRequired', null);
+    return data;
+  }
+  if (data.error === 'login') {
+    const error = new Error(LOGIN_LOST[data.reason] || LOGIN_LOST.missing);
+    error.login = data.reason || 'missing';
+    // The login screen itself only learns the answer; anything else means this device must sign in again.
+    if (action !== 'login') {
+      // Keep the first reason (say, a new code) rather than the plain "sign in" of a later request without a login.
+      if (login || !loginRequiredReason()) forgetLogin(error.login);
+      for (const listener of loginLostListeners) listener(error.login);
+    }
+    throw error;
+  }
+  throw new Error(data.error === 'unauthorized' ? '配對碼已失效，請重新配對' : data.error);
+}
+
+const LOGIN_LOST = {
+  missing: '要輸入登入碼才能同步',
+  unknown: '登入碼已經換新，請輸入新的登入碼',
+  disabled: '這個登入碼已經停用，請找管理者',
+  format: '登入碼是 8 個英文字母和數字',
+};
+
+// At most this many records go in one request; the rest follow in the next (a cloud file that went missing makes an
+// iPad send all it has again).
+const PUSH_LIMIT = 400;
+const MAX_ROUNDS = 30;
+
+// What the signed-in person may send again when the cloud asks (main.js sets it from team.js, which imports this file).
+let resendFilter = () => true;
+export function setResendFilter(filter) {
+  resendFilter = filter;
+}
+
+// Cloud files that could not be read in the last round; what was meant for them waits here.
+let brokenFiles = [];
+
+// What waits on this iPad for the cloud (2026-11-26, v47): own records and photos, and records someone else left on
+// a shared iPad, which wait for them to sign in here again.
+let waiting = { mine: 0, others: {}, oldest: 0, late: false, photos: 0 };
+const waitingListeners = new Set();
+
+export function waitingNow() {
+  return waiting;
+}
+
+export function onWaitingChange(listener) {
+  waitingListeners.add(listener);
+  return () => waitingListeners.delete(listener);
+}
+
+/** Queued changes that still have something to send (demo data and records gone from this iPad never go). */
+function sendable(outbox) {
+  return outbox.filter((item) => {
+    const record = store.get(item.collection, item.recordId);
+    return record && !record.demo;
+  });
+}
+
+/** Photos taken here whose image has not reached Drive: [{ at }]. */
+async function photosOnlyHere() {
+  const left = [];
+  for (const photo of store.all('photos')) {
+    if (photo.driveId || store.get('students', photo.studentId)?.demo) continue;
+    if (await store.readPhotoBlob(photo.id)) left.push({ at: photo.takenAt || photo.updatedAt || Date.now() });
+  }
+  return left;
+}
+
+/** Counts what waits here now and tells whoever shows it. */
+export async function countWaiting() {
+  const items = sendable(await store.readOutbox());
+  const summary = waitingSummary(items, currentLogin()?.id || '');
+  const photos = await photosOnlyHere();
+  const now = Date.now();
+  const oldPhoto = photos.some((photo) => now - photo.at >= LATE_UPLOAD_MS);
+  const next = { ...summary, photos: photos.length, late: summary.late || oldPhoto,
+    oldest: Math.min(summary.oldest || now, ...photos.map((photo) => photo.at)) };
+  waiting = next;
+  for (const listener of waitingListeners) listener(next);
+  return next;
+}
+
+/** Everything still on this iPad only, whoever left it: what a sign-out or disconnect would leave behind. */
+export function waitingTotal(state = waiting) {
+  return state.mine + Object.values(state.others || {}).reduce((sum, n) => sum + n, 0);
+}
+
+function deviceId() {
+  let id = store.getMeta('deviceId', null);
+  if (!id) {
+    id = newId('dv');
+    store.setMeta('deviceId', id);
+  }
+  return id;
+}
+
+/** One round of records. Returns true when more of one's own wait for another round. */
 async function syncRecords() {
   const outbox = await store.readOutbox();
+  const signedIn = currentLogin();
+  const me = signedIn?.id || '';
   const push = {};
-  for (const item of outbox) {
+  // Only the signed-in person's changes go up (2026-11-26): on a shared iPad, what the teacher before left waits for
+  // them, because the cloud would refuse their classes under someone else's login and the changes would be lost.
+  const skipped = outbox.filter((item) => !sendable([item]).length);
+  const own = sendable(outbox).filter((item) => sendsNow(item, me));
+  const sending = own.slice(0, PUSH_LIMIT);
+  for (const item of sending) {
     const record = store.get(item.collection, item.recordId);
-    if (!record || record.demo) continue;
     const file = fileForRecord(item.collection, record);
     (push[file] = push[file] || []).push(record);
   }
-  const since = store.getMeta('fileVersions', {});
-  const data = await call('sync', { push, since });
-  store.clearOutbox(outbox);
+  const since = store.getMeta('fileVersions', {}) || {};
+  // Which students the signed-in colleague opened (2026-11-25), for the admin's access log. Only their own go up;
+  // one left by someone else on a shared iPad waits for them, at most a week.
+  const queued = store.getMeta('seenQueue', []) || [];
+  const seen = signedIn ? queued.filter((s) => s.by === signedIn.id) : [];
+  // What this iPad will still hold after this round, for the admin's colleague list (2026-11-26).
+  const others = waitingSummary(sendable(outbox), me).others;
+  const device = { id: deviceId(), version: APP_VERSION, records: own.length - sending.length, photos: (await photosOnlyHere()).length, others };
+  const startedAt = Date.now();
+  const pulledAt = store.getMeta('pulledAt', 0) || 0;
+  const data = await call('sync', { push, since, device, ...(pulledAt ? { pulledAt } : {}), ...(seen.length ? { seen } : {}) });
+  // A cloud file that cannot be read keeps what was meant for it on this iPad until an admin restores it (2026-11-26).
+  const broken = new Set(data.broken || []);
+  brokenFiles = [...broken];
+  const kept = sending.filter((item) => broken.has(fileForRecord(item.collection, store.get(item.collection, item.recordId))));
+  store.clearOutbox([...sending.filter((item) => !kept.includes(item)), ...skipped]);
+  if (queued.length) {
+    const sent = new Set(seen);
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    store.setMeta('seenQueue', (store.getMeta('seenQueue', []) || []).filter((s) => !sent.has(s) && s.at > weekAgo));
+  }
+  // A new code of one's own went up with this round, so the cloud checks the new one from now on.
+  const login = currentLogin();
+  if (login?.next && (push.options || []).some((r) => r.id === login.id && r.type === 'staff')) updateLogin({ code: login.next, next: null });
   for (const file of Object.keys(data.pull || {})) {
     const collection = collectionForFile(file);
+    // Student details go field by field (2026-11-26): a field changed here meanwhile stays, the rest comes in.
+    if (collection === 'students') {
+      for (const record of data.pull[file]) {
+        const local = store.get('students', record.id);
+        const merged = mergeStudent(local, record);
+        if (!local || !sameStudent(local, merged)) store.saveFromSync('students', merged);
+      }
+      continue;
+    }
     const existing = data.pull[file].map((r) => store.get(collection, r.id)).filter(Boolean);
     const { changed } = mergeRecords(existing, data.pull[file]);
     for (const record of changed) store.saveFromSync(collection, record);
+    // A photo cleared 30 days after its student was deleted leaves this iPad too.
+    if (collection === 'photos') for (const record of changed) if (record.erased) store.removePhotoBlob(record.id).catch(() => {});
+  }
+  // What the cloud refused (say, a change to a student an admin deleted meanwhile) gives way to the cloud's copy,
+  // so this iPad does not keep showing something no other one has.
+  for (const file of Object.keys(data.rejected || {})) {
+    const collection = collectionForFile(file);
+    for (const record of data.rejected[file]) store.saveFromSync(collection, record);
   }
   store.setMeta('fileVersions', data.versions || {});
+  store.setMeta('pulledAt', startedAt);
+  if (data.devices) store.setMeta('teamDevices', data.devices);
+  // A cloud file went missing, was put back from a backup, or the whole folder was replaced (2026-11-26): every iPad
+  // sends its copies once more. Each request has its own id. A new iPad has just taken everything and sends nothing.
+  let more = own.length > sending.length;
+  if (data.resendId && data.resendId !== store.getMeta('resentId', null)) {
+    store.setMeta('resentId', data.resendId);
+    if (Object.keys(since).length && store.requeueAll(resendFilter)) more = true;
+  }
+  return more;
 }
 
 // Photos (2026-11-17). Their small records travel with the other data; the images go one by one.
@@ -215,25 +384,38 @@ export async function syncNow() {
   if (!isConnected()) return;
   if (running) { again = true; return; }
   if (!navigator.onLine) {
-    setStatus('offline', '離線中，紀錄已存在這台裝置');
+    const left = await countWaiting();
+    setStatus('offline', left.mine ? `離線中，${left.mine} 筆紀錄先存在這台 iPad，連上網路會自動上傳` : '離線中，紀錄已存在這台裝置');
+    return;
+  }
+  // Signed out after the cloud refused the code: nothing gets through until someone signs in.
+  if (!currentLogin() && loginRequiredReason()) {
+    const left = waitingTotal(await countWaiting());
+    setStatus('error', `要先輸入登入碼才能同步。${left ? `${left} 筆紀錄先存在這台 iPad。` : '紀錄仍在這台裝置。'}`);
     return;
   }
   running = true;
   setStatus('syncing', '同步中');
   try {
-    await syncRecords();
+    for (let round = 0; (await syncRecords()) && round < MAX_ROUNDS; round += 1);
     await syncPhotos();
     // A photo that just got its Drive copy sends its record in the same round.
-    if (store.all('photos').some((p) => p.driveId) && (await store.readOutbox()).some((item) => item.collection === 'photos')) await syncRecords();
+    if (store.all('photos').some((p) => p.driveId) && (await store.readOutbox()).some((item) => item.collection === 'photos' && sendsNow(item, currentLogin()?.id || ''))) await syncRecords();
     await syncCalendar();
     store.setMeta('lastSyncAt', Date.now());
     const now = new Date();
     const synced = `已同步 ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    if (photoProblem) setStatus('error', `${synced}，紀錄都已上傳。${photoProblem}`);
-    else if (photosAwaitingScript) setStatus('partial', `${synced}，紀錄都已上傳。照片影片 ${photosAwaitingScript} 個先存在這台 iPad，雲端連線程式更新後會自動補傳`);
-    else setStatus('ok', synced);
+    const left = await countWaiting();
+    // Records a teacher before left on this shared iPad wait for them; say whose, so nobody thinks they are lost.
+    const theirs = othersWaitingText(left.others, staffList(store.all('options')));
+    const tail = theirs ? `。${theirs}` : '';
+    if (brokenFiles.length) setStatus('error', `${synced}，但雲端有 ${brokenFiles.length} 個資料檔讀不出來，${left.mine} 筆紀錄先留在這台 iPad。請管理者照「設定步驟」還原備份${tail}`);
+    else if (photoProblem) setStatus('error', `${synced}，紀錄都已上傳。${photoProblem}${tail}`);
+    else if (photosAwaitingScript) setStatus('partial', `${synced}，紀錄都已上傳。照片影片 ${photosAwaitingScript} 個先存在這台 iPad，雲端連線程式更新後會自動補傳${tail}`);
+    else setStatus('ok', `${synced}${tail}`);
   } catch (error) {
-    setStatus('error', `同步失敗：${error.message}。紀錄仍在這台裝置。`);
+    const left = await countWaiting().catch(() => waiting);
+    setStatus('error', `同步失敗：${error.message}。${left.mine ? `${left.mine} 筆紀錄還沒上傳，仍在這台 iPad。` : '紀錄仍在這台裝置。'}`);
   } finally {
     running = false;
     if (again) {

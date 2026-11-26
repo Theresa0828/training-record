@@ -14,6 +14,8 @@ export function painScores(target) {
  * Opens the body map. Every tap is saved at once through onScores; each part's note through onPartNotes
  * (2026-11-23), the note for no part in particular through onNote.
  * Taking a part off needs the held button, takes its note with it, and leaves an undo.
+ * Nothing waits for 完成 (2026-11-26, 疼痛輸入修改也要可以自動儲存): a line says each change is kept, and closing the
+ * sheet any way at all (完成, 關閉) runs onDone, so the screen behind shows the new pain at once.
  */
 export function openPainSheet(title, {
   scores: initial = {}, partNotes: initialNotes = {}, note = '', notePlaceholder = '例如：下蹲到底才痛、刺痛',
@@ -21,9 +23,11 @@ export function openPainSheet(title, {
 }) {
   const scores = { ...initial };
   const notes = Object.fromEntries(Object.entries(initialNotes || {}).filter(([part, text]) => part in scores && String(text || '').trim()));
-  const saveNotes = () => onPartNotes?.({ ...notes });
+  const status = h('p', { class: 'muted small autosave-status', role: 'status' }, '改了會自動儲存，不用按完成。');
+  const saved = () => { status.textContent = '已自動儲存'; };
+  const saveNotes = () => { onPartNotes?.({ ...notes }); saved(); };
   let active = Object.keys(scores).at(-1) || null;
-  const save = () => onScores({ ...scores });
+  const save = () => { onScores({ ...scores }); saved(); };
   openSheet(title, (close) => {
     const picked = h('div', { class: 'body-picked' });
     const keypad = h('div', {});
@@ -56,7 +60,7 @@ export function openPainSheet(title, {
       draw();
     };
     const map = bodyMap(tapPart);
-    const noteInput = h('textarea', { class: 'input pain-note', placeholder: '不屬於單一部位的，例如：整天都很緊', 'aria-label': '其他疼痛附註', oninput: () => onNote(noteInput.value) });
+    const noteInput = h('textarea', { class: 'input pain-note', placeholder: '不屬於單一部位的，例如：整天都很緊', 'aria-label': '其他疼痛附註', oninput: () => { onNote(noteInput.value); saved(); } });
     noteInput.value = note || '';
     const drawChips = () => {
       picked.replaceChildren(...(Object.keys(scores).length
@@ -97,8 +101,8 @@ export function openPainSheet(title, {
         partNote) : '');
     };
     draw();
-    return h('div', { class: 'stack' }, map.el, picked, keypad,
+    return h('div', { class: 'stack' }, status, map.el, picked, keypad,
       h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '其他附註（不分部位）'), noteInput),
-      button('完成', () => { close(); onDone?.(); }, 'big primary'));
-  });
+      button('完成', close, 'big primary'));
+  }, { onClose: () => onDone?.() });
 }

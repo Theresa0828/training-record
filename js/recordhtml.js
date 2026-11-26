@@ -4,7 +4,7 @@
 // is never lost when the profile changes. Pure: no screen, no storage, so it is tested in Node.
 import {
   painList, painText, painNoteText, setLoad, equipmentText, assessmentsByDate, problemText, PROBLEM_STATUS,
-  bodyCompSummary, dateWithWeek, isBpFlagged, springFromText, SPRING_WORDS,
+  bodyCompSummary, dateWithWeek, isBpFlagged, springFromText, SPRING_WORDS, statusText,
 } from './core.js';
 
 const UNSAFE_FILE_CHARS = /[\\/:*?"<>|]/g;
@@ -234,14 +234,14 @@ function exercisesHtml(session, apparatus = {}) {
     pain: rows.some((r) => painText(r) || painNoteText(r)),
     quality: has('quality'),
     assist: has('assist'),
-    extra: rows.some((r) => r.props?.length || r.tags?.length || r.replacedFrom),
+    extra: rows.some((r) => r.props?.length || r.tags?.length || r.replacedFrom || String(r.planNote || '').trim()),
   };
   const columns = [['n', 'n', '#'], ['name', '', '動作'], ['sets', '', '每組（重量或彈簧 × 次數）'],
     show.rpe && ['rpe', 's', '自覺<br>費力<br><small>RPE<br>1–10</small>'],
     show.pain && ['pain', '', '疼痛<br><small>部位 分數 0–10</small>'],
     show.quality && ['quality', 's', '動作<br>品質<br><small>1–5</small>'],
     show.assist && ['assist', 's', '老師<br>協助'],
-    show.extra && ['extra', '', '道具・標籤<br>換動作']].filter(Boolean);
+    show.extra && ['extra', '', '道具・標籤<br>排課備註・換動作']].filter(Boolean);
   const total = columns.reduce((sum, [key]) => sum + COLUMN_SHARE[key], 0);
   const head = columns.map(([key, cls, label]) => {
     const share = Math.round((COLUMN_SHARE[key] / total) * 1000) / 10;
@@ -249,7 +249,10 @@ function exercisesHtml(session, apparatus = {}) {
   }).join('');
   const body = rows.map((row, i) => {
     const equipment = equipmentText(row) || (row.kind === 'pilates' ? apparatus[row.exerciseId] || '' : '');
-    const extra = [...(row.props || []), ...(row.tags || []), row.replacedFrom?.name ? `由「${row.replacedFrom.name}」換來` : '']
+    // The note written when planning (2026-11-26) is named as such, so it is not read as something seen in class.
+    const planNote = String(row.planNote || '').trim();
+    const extra = [...(row.props || []), ...(row.tags || []), planNote ? `排課備註：${planNote}` : '',
+      row.replacedFrom?.name ? `由「${row.replacedFrom.name}」換來` : '']
       .filter(Boolean).join('、');
     return `<tr><td class="n">${i + 1}</td>
 <td><b>${esc(row.name)}</b>${equipment ? `<br><small>${esc(equipment)}</small>` : ''}</td>
@@ -343,7 +346,8 @@ export function buildRecordHtml({
   const day = dateText(session.date);
   const shortDay = session.date ? session.date.replace(/-/g, '/') : '';
   const flags = session.flags || {};
-  const flagNames = [['sleep', '睡眠'], ['diet', '飲食'], ['mood', '心情'], ['pain', '疼痛']].filter(([key]) => flags[key]).map(([, label]) => label);
+  // 睡眠、飲食、心情 with what was picked and noted for each (2026-11-26).
+  const flagNames = ['sleep', 'diet', 'mood', 'pain'].filter((key) => flags[key]).map((key) => (key === 'pain' ? '疼痛' : statusText(session, key)));
   const condition = [flagNames.length ? `有狀況：${flagNames.join('、')}` : '睡眠、飲食、心情、疼痛都沒有特別狀況',
     session.special && `特殊狀況：${session.special}`].filter(Boolean).join('；');
   // The teacher's own line (CLAUDE.md): 120/80 or more is marked, so a doctor reading the file sees it at once.
@@ -386,6 +390,7 @@ ${alert}
 <h2>${esc(day)}</h2>
 <table class="info">
 ${line('一對二', partnerName ? `和 ${esc(partnerName)} 一起上` : '')}
+${line('本堂小目標', para(session.classGoal))}
 ${line('血壓、心跳', vitals)}
 ${line('今天的狀況', esc(condition))}
 ${line('上課前疼痛', dayPain ? esc(dayPain) : '沒有')}

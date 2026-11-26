@@ -2,11 +2,11 @@
 import { h, button, holdButton, backButton, go, back, home, openSheet, confirmSheet, toast, refreshView } from './dom.js';
 import * as store from './store.js';
 import { isConnected, isWaiting } from './sync.js';
-import { classNumberSheet, nextDateSheet } from './classinfo.js';
+import { classNumberSheet, nextDateSheet, countModeSheet } from './classinfo.js';
 import {
   dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, studentForEvent, cleanBirthday, recentPain, painNoteText, learnedSummary, pilatesLevel,
   weightTrends, volumeSeries, ONE_RM_MAX_REPS, painSeries, overallStatus, bodyCompSummary, painList, painText, setPainMap,
-  latestAssessment, problemCountText, problemText,
+  latestAssessment, problemCountText, problemText, canDeleteStudent, classTeacherId, classCountFor, countViewerId, countsSeparately,
 } from './core.js';
 import { openPainSheet, painScores } from './painsheet.js';
 import { exportPdf } from './print.js';
@@ -17,6 +17,8 @@ import { termRing, calendarPage, sparkline, painBars, learnedTile, qualityDots }
 import { bodyMap } from './bodymap.js';
 import { assessmentSheet, editAssessment, latestSummary, problemFigure, problemLegend, lifeNeeds } from './assess.js';
 import { sessionTable, sessionFacts, sessionTitle } from './history.js';
+import { me, team, visible, teachersFor, setTeacher, mine, myPlan, classTeacher } from './team.js';
+import { logSheet } from './accesslog.js';
 
 function shortDate(key) {
   return key.slice(5).replace('-', '/');
@@ -26,7 +28,7 @@ function shortDate(key) {
 // A blank name or an unreadable birthday is not stored; the old one stays and the line under the field says why.
 // The page reads as one line of thought (2026-11-24): daily life and sport → the body (pain, limits, movement
 // problems, on one figure) → the training goal, which shows what it rests on while it is written.
-function editProfileSheet(student) {
+export function editProfileSheet(student) {
   let changed = false;
   openSheet('學生資料', (close) => {
     const current = () => store.get('students', student.id) || student;
@@ -146,7 +148,8 @@ function editProfileSheet(student) {
     drawBody();
     drawBasis();
 
-    const others = store.all('students').filter((s) => s.id !== student.id);
+    // A teacher merges only into their own students; an admin into anyone.
+    const others = visible(store.all('students'), true).filter((s) => s.id !== student.id);
     const hasRecords = store.all('sessions').some((s) => s.studentId === student.id);
     // A graduated student is archived, not deleted (2026-11-25): folded away in the 學生 list, every record kept.
     // It is undone in one tap, so it needs no hold; the toast offers 復原 as well.
@@ -174,6 +177,87 @@ function editProfileSheet(student) {
             : '封存後在學生清單裡收起來，上課紀錄和照片都留著，隨時可以取消封存。')),
         button(s.archived ? '取消封存' : '封存這位學生', toggle, ''));
     };
+    // Who teaches this student (2026-11-24). An admin adds or removes a teacher with one tap, undone from the toast;
+    // a teacher sees the list. Only shown once colleagues share the app.
+    const teachersSection = () => {
+      const who = me();
+      if (!who || student.demo) return null;
+      const box = h('section', { class: 'pf-teachers stack' });
+      const draw = () => {
+        const teaching = teachersFor(student.id);
+        const ids = new Set(teaching.map((p) => p.id));
+        const names = teaching.map((p) => (p.disabled ? `${p.name}（已停用）` : p.name)).join('、');
+        if (who.role !== 'admin') {
+          box.replaceChildren(
+            h('span', { class: 'pf-label' }, '負責老師'),
+            h('p', {}, names || '還沒有'),
+            h('p', { class: 'muted small' }, '要加入或換老師，請找管理者。'));
+          return;
+        }
+        const set = (person, on) => {
+          setTeacher(student.id, person.id, on);
+          draw();
+          refreshView();
+          toast(on ? `已把 ${person.name} 加進來` : `已把 ${person.name} 移出`, {
+            label: '復原',
+            run: () => { setTeacher(student.id, person.id, !on); draw(); refreshView(); },
+          });
+        };
+        // A disabled colleague is listed only while still a teacher here, so the admin can take them off.
+        const choices = team().filter((p) => !p.disabled || ids.has(p.id));
+        box.replaceChildren(
+          h('div', { class: 'stack-xs' },
+            h('span', { class: 'pf-label' }, '負責老師'),
+            h('span', { class: 'muted small' }, `${teaching.some((p) => !p.disabled)
+              ? '點名字加入或移出。轉給別的老師：先點新的老師，再點掉原本的。'
+              : '還沒有老師，只有管理者看得到這位學生。點名字加入。'}學生在誰的預約日曆上，誰就會自動加進來。`)),
+          h('div', { class: 'chips' }, choices.map((person) => button(
+            person.disabled ? `${person.name}（已停用）` : person.name,
+            () => set(person, !ids.has(person.id)),
+            'chip-btn',
+            { 'aria-pressed': ids.has(person.id) ? 'true' : 'false' },
+          ))));
+      };
+      draw();
+      return box;
+    };
+    // 第幾堂 with two or more teachers (2026-11-25 sixth form): one count for the student, or each teacher their own
+    // from class 1 with their own term size. Any of the student's teachers may choose; it is part of the details.
+    const countSection = () => {
+      if (!me() || student.demo) return null;
+      const box = h('section', { class: 'pf-teachers pf-count stack' });
+      const draw = () => {
+        const separate = countsSeparately(current());
+        if (teachersFor(student.id).length < 2 && !separate) { box.replaceChildren(); box.hidden = true; return; }
+        box.hidden = false;
+        // The numbers are checked once before switching (2026-11-26: 中途換的話要有機制防止記錯堂數).
+        const choose = (value) => {
+          if ((value === 'separate') === countsSeparately(current())) return;
+          countModeSheet(student.id, value, (fields) => {
+            saveFields(fields);
+            draw();
+          });
+        };
+        box.replaceChildren(
+          h('div', { class: 'stack-xs' },
+            h('span', { class: 'pf-label' }, '第幾堂怎麼算'),
+            h('span', { class: 'muted small' }, '好幾位老師教這位學生時，看課程方案選。')),
+          h('span', { class: 'chip-seg', role: 'group', 'aria-label': '第幾堂怎麼算' },
+            [['together', '一起算'], ['separate', '各算各的']].map(([value, label]) => button(label, () => choose(value),
+              'chip-btn seg-btn', { 'aria-pressed': (value === 'separate') === separate ? 'true' : 'false' }))),
+          h('p', { class: 'muted small', role: 'status' }, separate
+            ? '每位老師只數自己上的課，一期幾堂也各自設定。'
+            : '不管哪位老師上課，都接著同一個號碼數。'));
+      };
+      draw();
+      return box;
+    };
+    // The admin's way into the access log for this student (2026-11-25).
+    const logSection = () => me()?.role === 'admin' && !student.demo && h('section', { class: 'pf-archive pf-log' },
+      h('div', { class: 'stack-xs' },
+        h('span', { class: 'pf-label' }, '存取紀錄'),
+        h('span', { class: 'muted small' }, '誰在什麼時候看過、改過這位學生。')),
+      button('誰看過、改過', () => logSheet(current()), ''));
     const step =(no, title, help, ...body) => h('section', { class: 'pf-step' },
       h('span', { class: 'pf-no', 'aria-hidden': 'true' }, no),
       h('div', { class: 'pf-step-body' }, h('h3', { class: 'pf-title' }, title), help && h('p', { class: 'muted small' }, help), ...body));
@@ -203,7 +287,11 @@ function editProfileSheet(student) {
           const merged = findStudentByName(others, other.name);
           const self = current();
           store.save('students', { ...merged, birthday: merged.birthday || self.birthday || '', aliases: [...new Set([...(merged.aliases || []), self.name])] });
-          store.save('students', { ...self, deleted: true });
+          store.save('students', { ...self, deleted: true, mergedInto: merged.id });
+          // The merged student keeps this card's teachers. A teacher moves only themself; the cloud takes only that.
+          const mover = me();
+          const joined = teachersFor(self.id)
+            .filter((p) => (!mover || mover.role === 'admin' || p.id === mover.id) && setTeacher(merged.id, p.id, true));
           changed = false;
           close();
           back();
@@ -213,23 +301,33 @@ function editProfileSheet(student) {
             run: () => {
               store.save('students', merged);
               store.save('students', { ...self, deleted: false });
+              joined.forEach((p) => setTeacher(merged.id, p.id, false));
               back();
               go('overview', { studentId: student.id });
             },
           });
         }, 'list-item'))),
+      teachersSection(),
+      countSection(),
+      logSection(),
       archiveSection(),
-      h('div', { class: 'stack' },
+      // Once colleagues share the app only an admin deletes a student; a teacher archives instead. It can be undone
+      // for 30 days from the bottom of the 學生 list (2026-11-25).
+      canDeleteStudent(team(), me()) && h('div', { class: 'stack' },
         button('刪除這位學生的所有紀錄', () => confirmSheet(
           `刪除 ${current().name}`,
-          `會刪除 ${current().name} 的資料與所有上課紀錄，所有裝置和 Google 雲端同步後都會清除，無法復原。雲端 PDF 資料夾裡已匯出的 PDF 要另外手動刪除。`,
+          `會刪除 ${current().name} 的學生資料、上課紀錄、課表和照片影片，每台裝置同步後都看不到。30 天內可以在學生清單最下面的「最近刪除」復原，30 天後就清掉、找不回來。雲端「完整紀錄」和「PDF」資料夾裡的 PDF 不會刪，要另外手動刪除。`,
           '確定刪除',
           () => {
-            store.eraseStudent(student.id);
+            const name = current().name;
+            store.deleteStudent(student.id, me()?.id || '');
             changed = false;
             close();
             home();
-            toast(`已刪除 ${student.name} 的所有紀錄`);
+            toast(`已刪除 ${name}，30 天內可以在學生清單最下面復原`, {
+              label: '復原',
+              run: () => { store.restoreStudent(student.id); refreshView(); },
+            });
           },
         ), 'ghost danger-text')));
   }, { wide: true, onClose: () => { if (changed) refreshView(); } });
@@ -242,14 +340,19 @@ function historySheet(history) {
     const items = history.map((session) => {
       const badge = h('span', { class: 'upload-badge' });
       const item = button([h('span', {}, sessionTitle(session)), badge], () => {
+        // With colleagues, each class says who taught it, and only that teacher can change it (2026-11-26).
+        const teacher = team().length ? classTeacher(session).name : '';
+        const edited = session.editedAt ? `修改過 ${session.editedAt.slice(5, 10).replace('-', '/')}` : '';
         openSheet(session.date.replaceAll('-', '/'), (close) => h('div', { class: 'stack-sm' },
           h('div', { class: 'row-between' },
-            h('span', { class: 'muted small' }, session.editedAt ? `修改過 ${session.editedAt.slice(5, 10).replace('-', '/')}` : ''),
-            button([icon('pencil'), h('span', {}, '編輯這堂')], () => {
-              close();
-              closeList();
-              go('record', { studentId: session.studentId, sessionId: session.id });
-            }, '')),
+            h('span', { class: 'muted small' }, [teacher && `${teacher}上的課`, edited].filter(Boolean).join('・')),
+            mine(session)
+              ? button([icon('pencil'), h('span', {}, '編輯這堂')], () => {
+                close();
+                closeList();
+                go('record', { studentId: session.studentId, sessionId: session.id });
+              }, '')
+              : h('span', { class: 'muted small' }, '只有上課的老師能改')),
           sessionFacts(session), sessionTable(session, (row) => rowMediaStrip(session, row))), { wide: true });
       }, 'list-item history-item');
       // Changes kept on this iPad but not yet saved come first; then saved ones still waiting for Drive.
@@ -320,16 +423,25 @@ function problemCard(student, span) {
     : h('span', { class: 'card-empty' }, '還沒評估，點一下新增'));
 }
 
-function termCard(studentId, todaySession, count) {
+/**
+ * 第幾堂. `whose` names the teacher when each teacher counts separately. Another teacher's class today is corrected
+ * by that teacher (2026-11-26: 只能改自己上的課).
+ */
+function termCard(studentId, todaySession, count, viewer, whose) {
   const note = count.newTerm ? '新的一期' : count.no === count.size ? '最後一堂' : '';
+  const theirs = todaySession && !mine(todaySession);
   return h('button', {
     type: 'button',
     class: 'stat-card rise span-2',
-    'aria-label': `${todaySession ? '今天' : '下一堂'}是第 ${count.no} 堂，共 ${count.size} 堂，點一下修正`,
-    onclick: () => classNumberSheet(studentId, todaySession, refreshView),
+    'aria-label': `${whose ? `${whose}的` : ''}${todaySession ? '今天' : '下一堂'}是第 ${count.no} 堂，共 ${count.size} 堂${theirs ? '' : '，點一下修正'}`,
+    onclick: () => (theirs
+      ? toast(`今天這堂是${classTeacher(todaySession).name || '別的老師'}上的課，要修正請找上課的老師`)
+      : classNumberSheet(studentId, todaySession, refreshView, viewer)),
   },
   h('span', { class: 'card-title' }, h('span', {}, todaySession ? '今天第幾堂' : '下一堂第幾堂')),
-  h('span', { class: 'term-body' }, termRing(count.no, count.size), h('span', { class: 'term-side' }, h('span', { class: 'muted' }, `共 ${count.size} 堂`), note && h('span', { class: 'small' }, note))));
+  h('span', { class: 'term-body' }, termRing(count.no, count.size), h('span', { class: 'term-side' },
+    whose && h('span', { class: 'small' }, `${whose}的課`),
+    h('span', { class: 'muted' }, `共 ${count.size} 堂`), note && h('span', { class: 'small' }, note))));
 }
 
 function nextCard(student) {
@@ -571,13 +683,20 @@ function bodyCard(student, span) {
 export function overviewView({ studentId }) {
   const student = store.get('students', studentId);
   const history = doneSessions(store.all('sessions'), studentId);
-  const plan = store.get('plans', studentId);
+  const plan = myPlan(studentId);
   const hasPlan = plan && !plan.used && plan.rows?.length;
   const today = dateKey();
-  const inClass = store.all('sessions').some((s) => s.studentId === studentId && s.date === today && s.status === 'draft');
+  // 開始上課 opens this teacher's own class: another teacher's class today stays theirs (2026-11-26).
+  const inClass = store.all('sessions').some((s) => s.studentId === studentId && s.date === today && s.status === 'draft' && mine(s));
   const bookedToday = store.all('events').some((e) => e.date === today && !e.change && studentForEvent(store.all('students'), e)?.id === student.id);
-  const todaySession = store.all('sessions').find((s) => s.studentId === studentId && s.date === today && s.classNo);
-  const count = todaySession ? { no: todaySession.classNo, size: todaySession.packageSize } : nextClassNumber(history.filter((s) => s.date !== today), student);
+  // Whose class count shows (2026-11-25 sixth form): one count when counted together, else the teacher's own.
+  const staff = team();
+  const viewer = countViewerId(student, history, staff, me(), teachersFor(studentId).map((p) => p.id));
+  const byViewer = (s) => !viewer || classTeacherId(s, staff) === viewer;
+  const todaySession = store.all('sessions').find((s) => s.studentId === studentId && s.date === today && s.classNo && byViewer(s));
+  const count = todaySession ? { no: todaySession.classNo, size: todaySession.packageSize }
+    : classCountFor(history.filter((s) => !(s.date === today && byViewer(s))), student, viewer, staff);
+  const whose = countsSeparately(student) && viewer && teachersFor(studentId).length > 1 ? staff.find((p) => p.id === viewer)?.name || '' : '';
   // Whatever this student needs next is the one big button.
   const classFirst = inClass || bookedToday || hasPlan;
   const hasStrength = history.some((session) => session.rows.some((row) => row.kind === 'strength'));
@@ -602,7 +721,7 @@ export function overviewView({ studentId }) {
       // The goal sits beside the movement problems so the two can be read against each other (2026-11-23).
       textCard(student, 'span-3', '訓練目標', null, student.goal, '還沒填寫，點一下填寫'),
       problemCard(student, 'span-3'),
-      termCard(studentId, todaySession, count),
+      termCard(studentId, todaySession, count, viewer, whose),
       nextCard(student),
       statusCard(history, 'span-2'),
       learnedCard(history, 'span-3'),

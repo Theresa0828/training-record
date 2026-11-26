@@ -1,6 +1,6 @@
-import { go, registerView, installTapGuard, installKeyboardLift, refreshView, currentView, toast } from './dom.js';
+import { go, registerView, installTapGuard, installKeyboardLift, installPenHint, refreshView, currentView, toast } from './dom.js';
 import * as store from './store.js';
-import { startAutoSync, onStatus, onCalendarChange } from './sync.js';
+import { startAutoSync, onStatus, onCalendarChange, onLoginLost, setResendFilter, onWaitingChange } from './sync.js';
 import { startFullRecords, onRecordStatus, recordStatusText } from './fullrecord.js';
 import { dateKey, legacySpine } from './core.js';
 import { todayView } from './today.js';
@@ -11,6 +11,7 @@ import { libraryView } from './library.js';
 import { settingsView, paletteId } from './settings.js';
 import { studentsView } from './students.js';
 import { reportView } from './report.js';
+import { loginView, loginNeeded, canSee, notYoursView, deletedView, noteSeen, mayChange, mine, onSignedIn } from './team.js';
 
 // A button that fails must say so. Silence looks like the tap never landed.
 function reportFailure(reason) {
@@ -22,6 +23,7 @@ async function boot() {
   window.addEventListener('unhandledrejection', (e) => reportFailure(e.reason));
   installTapGuard();
   installKeyboardLift();
+  installPenHint();
   await store.loadStore();
   // 2026-11-07 the teacher chose 砂色＋森林綠: every device switches to it once; a later choice in 設定 is kept.
   if (!store.getMeta('paletteMintOnce')) {
@@ -35,15 +37,41 @@ async function boot() {
     store.save('exercises', { ...exercise, tags: { ...exercise.tags, stability: legacySpine(exercise.tags) } });
   }
   settleOldDrafts();
+  // A teacher's classes left open on earlier days close once they sign in (2026-11-26): on an iPad colleagues share,
+  // nobody is signed in when the app starts.
+  onSignedIn(() => settleOldDrafts());
+  // A student deleted 30 days ago is cleared now (2026-11-25), on whichever iPad gets there first.
+  store.purgeExpired(Date.now(), mayChange);
 
-  registerView('today', todayView);
-  registerView('record', recordView);
-  registerView('overview', overviewView);
-  registerView('plan', planView);
-  registerView('library', libraryView);
-  registerView('students', studentsView);
-  registerView('settings', settingsView);
-  registerView('report', reportView);
+  // Once colleagues share the app (2026-11-25), every screen asks for a login code until someone signs in on this device.
+  const guarded = (render) => (params) => (loginNeeded() ? loginView() : render(params));
+  // A teacher sees only their own students (2026-11-24). A class already open keeps going, like the login check.
+  // A student merged into another opens as that one; a deleted one says so (2026-11-25). Each student screen
+  // opened is noted for the admin's access log.
+  const ownStudent = (render) => guarded((params) => {
+    let student = params?.studentId && store.get('students', params.studentId);
+    const into = student?.deleted && student.mergedInto && store.get('students', student.mergedInto);
+    if (into && !into.deleted) {
+      student = into;
+      params = { ...params, studentId: into.id };
+    }
+    if (student?.deleted) return deletedView(student);
+    if (student && !canSee(student)) return notYoursView();
+    noteSeen(student?.id);
+    return render(params);
+  });
+  registerView('login', guarded(() => todayView()));
+  registerView('today', guarded(todayView));
+  registerView('record', guarded((params) => {
+    noteSeen(params?.studentId);
+    return recordView(params);
+  }));
+  registerView('overview', ownStudent(overviewView));
+  registerView('plan', ownStudent(planView));
+  registerView('library', guarded(libraryView));
+  registerView('students', guarded(studentsView));
+  registerView('settings', guarded(settingsView));
+  registerView('report', ownStudent(reportView));
   go('today');
 
   store.onSaveError(() => toast('這台裝置暫時存不了資料，App 會自動再試。請先不要關閉 App，也確認 iPad 還有儲存空間。'));
@@ -56,6 +84,16 @@ async function boot() {
     if (currentView()?.name !== 'record') settleOldDrafts();
     if (currentView()?.name === 'today') refreshView();
   });
+  // A colleague disabled on another device has to sign in again here, though never in the middle of a class.
+  const askLoginIfNeeded = () => {
+    if (!loginNeeded() || currentView()?.name === 'record' || document.querySelector('.login')) return;
+    // A panel left open (say, the colleague list) would sit on top of the login screen.
+    for (const overlay of document.querySelectorAll('#sheet-root .sheet-overlay')) overlay.remove();
+    refreshView();
+  };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') askLoginIfNeeded(); });
+  // The cloud refused this device's code (disabled, a new code, or colleagues just started): ask at once, class aside.
+  onLoginLost(() => askLoginIfNeeded());
 
   let lastState = null;
   onStatus((status) => {
@@ -67,6 +105,16 @@ async function boot() {
     }
     // New bookings may have arrived. Never redraw under an open class record.
     if (finished && currentView()?.name === 'today') refreshView();
+    if (finished) askLoginIfNeeded();
+    if (finished) store.purgeExpired(Date.now(), mayChange);
+    // Taken off this student, or the student deleted or brought back, on another iPad (2026-11-24, 2026-11-25): the
+    // overview or report follows at once. A plan being written, a class or an open panel waits for the next screen,
+    // so nothing typed is lost.
+    const view = currentView();
+    const shown = finished && ['overview', 'report'].includes(view?.name) && store.get('students', view.params?.studentId);
+    const goneNow = shown && (shown.deleted || !canSee(shown));
+    const goneShown = !!document.querySelector('[data-student-gone]');
+    if (shown && !shown.mergedInto && goneNow !== goneShown && !document.querySelector('#sheet-root .sheet-overlay')) refreshView();
   });
   // A booking moved in the calendar redraws the screens that show it, but never a class record or an open sheet.
   onCalendarChange(() => {
@@ -80,6 +128,19 @@ async function boot() {
       el.textContent = recordStatusText(s);
       el.classList.toggle('warn', !!s.problem);
     }
+  });
+  // When the cloud asks every iPad to send its copies again (2026-11-26), each person sends what is theirs to change:
+  // their own classes and plans, and the shared records they may edit.
+  setResendFilter((collection, record) => (collection === 'sessions' || collection === 'plans' ? mine(record) : mayChange(collection, record)));
+  // Records that waited over a day for the cloud put a reminder on Today, and it goes once they are up.
+  let lateShown = null;
+  onWaitingChange((w) => {
+    const key = w.late ? `${w.mine}|${w.photos}` : '';
+    if (key === lateShown) return;
+    const first = lateShown === null;
+    lateShown = key;
+    if (first && !key) return;
+    if (currentView()?.name === 'today' && !document.querySelector('#sheet-root .sheet-overlay')) refreshView();
   });
   startFullRecords();
   startAutoSync();

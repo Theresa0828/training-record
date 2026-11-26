@@ -3,6 +3,7 @@ import { toast } from './dom.js';
 import * as store from './store.js';
 import { MAX_SETS, painNoteText, painText, rowDetails, setLoad } from './core.js';
 import { call, isConnected } from './sync.js';
+import { classTeacher, me } from './team.js';
 
 const PER_PAGE = 3;
 const ROWS = 8;
@@ -81,13 +82,13 @@ table.mre-foot { font-size: 8pt; }
 `;
 
 /** Pure layout, so it can be sent to Drive as-is. Every stored value is escaped. */
-export function buildFormHtml(student, sessions, coachName, coachSignature, form = {}) {
+export function buildFormHtml(student, sessions, coachName, coachSignature, form = {}, teacherOf = () => [coachName, coachSignature]) {
   const pages = [];
   const ordered = sessions.slice().sort((a, b) => a.date.localeCompare(b.date));
   for (let i = 0; i < ordered.length; i += PER_PAGE) {
     pages.push(`<div class="mre-page">
 <table class="mre-head"><tr><td class="mre-title">${escapeHtml(form.title)}</td><td class="mre-right">教練：${escapeHtml(coachName)}　學生：${escapeHtml(student.name)}</td></tr></table>
-${ordered.slice(i, i + PER_PAGE).map((s) => sessionHtml(s, coachName, coachSignature)).join('')}
+${ordered.slice(i, i + PER_PAGE).map((s) => sessionHtml(s, ...teacherOf(s))).join('')}
 <table class="mre-foot"><tr><td>${escapeHtml(form.footerLeft)}</td><td class="mre-right">${escapeHtml(form.footerRight)}</td></tr></table>
 </div>`);
   }
@@ -96,8 +97,12 @@ ${ordered.slice(i, i + PER_PAGE).map((s) => sessionHtml(s, coachName, coachSigna
 
 export async function exportPdf(student, sessions) {
   const connection = store.getMeta('connection');
-  const coachName = connection?.teacher || '';
-  const body = buildFormHtml(student, sessions, coachName, store.getMeta('coachSignature'), connection?.form);
+  const coachName = me()?.name || connection?.teacher || '';
+  // Each class shows the teacher who taught it once colleagues share the app (2026-11-24).
+  const body = buildFormHtml(student, sessions, coachName, store.getMeta('coachSignature'), connection?.form, (s) => {
+    const { name, signature } = classTeacher(s);
+    return [name, signature];
+  });
   if (isConnected() && navigator.onLine) {
     toast('PDF 製作中，約需幾秒');
     try {

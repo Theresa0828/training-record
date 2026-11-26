@@ -5,11 +5,12 @@ export const DEFAULT_TAGS = ['左肩痛', '腰代償', '脖子代償', '肩胛�
 export const DEFAULT_PROPS = ['滾筒', '彈力帶', '瑜珈球', 'Box'];
 export const APPARATUS = ['Reformer', 'Cadillac', 'Chair', 'Mat', 'Arc Barrel', 'Spine Corrector'];
 export const ASSIST_LEVELS = ['無', '少', '中', '多'];
-// Each apparatus has its own springs (2026-11-13). Reformer: red, blue, yellow, green and a low/middle/high bar.
+// Each apparatus has its own springs (2026-11-13). Reformer: red, blue, yellow, green. Its low/middle/high bar was
+// taken out on 2026-11-26 (使用者：把 reformer 彈簧位置刪除); old records keep what they wrote, such as 2r1b m.
 // Chair: black and green, each colour hung in its own Top/High/Middle/Low hole, written in capitals after
 // the colour (1kT 1gL, 2026-11-16). Cadillac: yellow, purple, short red, long red, blue.
 export const SPRING_SETS = {
-  reformer: { colors: ['r', 'b', 'y', 'g'], positions: ['l', 'm', 'h'], holes: [] },
+  reformer: { colors: ['r', 'b', 'y', 'g'], positions: [], holes: [] },
   chair: { colors: ['k', 'g'], positions: [], holes: ['T', 'H', 'M', 'L'] },
   cadillac: { colors: ['y', 'p', 'rs', 'rl', 'b'], positions: [], holes: [] },
 };
@@ -388,8 +389,8 @@ export function rowsFromSession(session) {
     equipment: row.equipment || '',
     band: row.band || '',
     sets: row.sets.map((set) => makeSet(set.done
-      ? { weight: set.weight, reps: set.reps, spring: set.spring }
-      : { weight: set.planWeight, reps: set.planReps, spring: set.planSpring })),
+      ? { weight: set.weight, reps: set.reps, spring: springWithoutBar(set.spring) }
+      : { weight: set.planWeight, reps: set.planReps, spring: springWithoutBar(set.planSpring) })),
     rpe: null,
     painScore: null,
     painParts: [],
@@ -399,6 +400,8 @@ export function rowsFromSession(session) {
     assist: null,
     props: (row.props || []).slice(),
     tags: [],
+    // The note written for the exercise when planning goes on to the next plan, like the props (2026-11-26).
+    ...(row.planNote ? { planNote: row.planNote } : {}),
   }));
 }
 
@@ -440,7 +443,15 @@ export function applySuggestion(row, suggestion) {
 /** Starting rows for a new session: the saved plan first, otherwise a copy of last time. */
 export function startingRows(plan, history) {
   if (plan && !plan.used && plan.rows && plan.rows.length) {
-    return JSON.parse(JSON.stringify(plan.rows));
+    const rows = JSON.parse(JSON.stringify(plan.rows));
+    // A plan saved before the Reformer bar went (2026-11-26) is written the new way too.
+    for (const row of rows) {
+      for (const set of row.sets || []) {
+        if (set.spring) set.spring = springWithoutBar(set.spring);
+        if (set.planSpring) set.planSpring = springWithoutBar(set.planSpring);
+      }
+    }
+    return rows;
   }
   return history.length ? rowsFromSession(history[0]) : [];
 }
@@ -482,13 +493,15 @@ export function classLabel(no, size) {
  * when a class today comes first and is not finished yet; after the last class of a term it starts again from 1.
  * bookedToday: the student has a class today that is not on leave.
  */
-export function laterClassNumber(student, sessions, today, bookedToday) {
+export function laterClassNumber(student, sessions, today, bookedToday, staffId = '', staff = []) {
   const step = (count) => (count.no + 1 > count.size ? { no: 1, size: count.size } : { no: count.no + 1, size: count.size });
-  const open = sessions.find((s) => s.studentId === student.id && s.date === today && s.status !== 'done' && !s.deleted);
-  if (open?.classNo) return step({ no: open.classNo, size: open.packageSize || student.packageSize || PACKAGE_SIZES[0] });
+  // With colleagues, the class booked today is this teacher's own (2026-11-26).
+  const own = (s) => !staffId || classTeacherId(s, staff) === staffId;
+  const open = sessions.find((s) => s.studentId === student.id && s.date === today && s.status !== 'done' && !s.deleted && own(s));
+  if (open?.classNo) return step({ no: open.classNo, size: open.packageSize || termFor(student, staffId, staff).packageSize || PACKAGE_SIZES[0] });
   const history = doneSessions(sessions, student.id);
-  const next = nextClassNumber(history, student);
-  const finishedToday = history.some((s) => s.date === today);
+  const next = classCountFor(history, student, staffId, staff);
+  const finishedToday = history.some((s) => s.date === today && own(s));
   return (bookedToday || open) && !finishedToday ? step(next) : { no: next.no, size: next.size };
 }
 
@@ -502,6 +515,539 @@ export function studentGroups(students, query = '') {
     .filter((s) => !s.deleted && (!text || s.name.includes(text)))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
   return { active: matches.filter((s) => !s.archived), archived: matches.filter((s) => s.archived) };
+}
+
+/*
+ * Colleagues and login codes (2026-11-25, multi-user batch 1, part 1). A colleague is an `options` record of type
+ * 'staff' (so it syncs like the other lists, with no new database table): { id, type: 'staff', name, role, codeHash,
+ * disabled }. The code itself is shown once, when it is made, and only its hash is kept. Until the first colleague
+ * exists the app works as before, without any login.
+ */
+export const STAFF_ROLES = [['teacher', '老師'], ['admin', '管理者']];
+// Letters and digits that cannot be mistaken for one another when read off an email: no I, L, O, 0 or 1.
+export const LOGIN_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const CODE_LENGTH = 8;
+
+/** A new code, 'K7QM-4XPA'. randomByte() gives 0–255; bytes past the last whole round of the alphabet are skipped. */
+export function makeLoginCode(randomByte) {
+  const limit = 256 - (256 % LOGIN_ALPHABET.length);
+  let code = '';
+  while (code.length < CODE_LENGTH) {
+    const byte = randomByte();
+    if (byte < limit) code += LOGIN_ALPHABET[byte % LOGIN_ALPHABET.length];
+  }
+  return `${code.slice(0, 4)}-${code.slice(4)}`;
+}
+
+/** What someone typed or pasted, as the 8 letters the hash is made from; '' when it cannot be a code. */
+export function normalizeLoginCode(input) {
+  const letters = String(input || '').toUpperCase().replace(/[\s\-–—_.]/g, '');
+  return letters.length === CODE_LENGTH && [...letters].every((ch) => LOGIN_ALPHABET.includes(ch)) ? letters : '';
+}
+
+/** The stored fingerprint of a code. Salted with the colleague's id, so two people never share a hash. */
+export async function hashLoginCode(code, salt) {
+  const bytes = new TextEncoder().encode(`training-record:${salt}:${normalizeLoginCode(code)}`);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function staffList(options) {
+  return options.filter((o) => o.type === 'staff' && !o.deleted);
+}
+
+/** Multi-user mode starts with the first colleague who can sign in. */
+export function multiUserOn(staff) {
+  return staff.some((s) => !s.disabled);
+}
+
+/**
+ * The colleague signed in on this device, or null (none, or disabled since). `login` is what this device keeps:
+ * { id, name, role } (or only the id). Right after a first sign-in the colleague list may not have arrived yet, so
+ * the name and role kept at sign-in stand in until it does.
+ */
+export function signedInStaff(staff, login) {
+  const id = typeof login === 'string' ? login : login?.id;
+  if (!id) return null;
+  const person = staff.find((s) => s.id === id);
+  if (person) return person.disabled ? null : person;
+  return login?.name ? { id, name: login.name, role: login.role === 'admin' ? 'admin' : 'teacher' } : null;
+}
+
+/** `required`: the cloud has said this device must sign in, even before the colleague list reached it. */
+export function needsLogin(staff, login, required = false) {
+  return (multiUserOn(staff) || !!required) && !signedInStaff(staff, login);
+}
+
+/** Checks a typed code. reason: 'ok', 'format' (not 8 letters), 'disabled', or 'unknown'. */
+export async function checkLoginCode(staff, input) {
+  if (!normalizeLoginCode(input)) return { reason: 'format', staff: null };
+  for (const person of staff) {
+    if (person.codeHash && person.codeHash === await hashLoginCode(input, person.id)) {
+      return person.disabled ? { reason: 'disabled', staff: null } : { reason: 'ok', staff: person };
+    }
+  }
+  return { reason: 'unknown', staff: null };
+}
+
+/** Disabling someone may never lock the team out: not yourself, and never the last admin who can sign in. */
+export function canDisableStaff(staff, target, me) {
+  if (target.disabled) return { ok: false, reason: '已經停用了' };
+  if (target.id === me?.id) return { ok: false, reason: '不能停用自己' };
+  const admins = staff.filter((s) => s.role === 'admin' && !s.disabled);
+  if (target.role === 'admin' && admins.length <= 1) return { ok: false, reason: '至少要留一位管理者' };
+  return { ok: true, reason: '' };
+}
+
+/**
+ * A new name or role for a colleague. Names stay unique, nobody changes their own role (another admin does), and
+ * the last admin who can sign in stays an admin.
+ */
+export function canEditStaff(staff, target, me, next) {
+  const name = String(next.name || '').trim();
+  if (!name) return { ok: false, reason: '請輸入姓名' };
+  if (staff.some((s) => s.id !== target.id && s.name === name)) return { ok: false, reason: `已經有${name}了` };
+  if (next.role !== target.role) {
+    if (target.id === me?.id) return { ok: false, reason: '不能改自己的身分，請另一位管理者改' };
+    const admins = staff.filter((s) => s.role === 'admin' && !s.disabled);
+    if (target.role === 'admin' && !target.disabled && admins.length <= 1) return { ok: false, reason: '至少要留一位管理者' };
+  }
+  return { ok: true, reason: '' };
+}
+
+/**
+ * Only an admin deletes a student once colleagues share the app; before that the teacher alone decides (2026-11-25).
+ * Whoever is signed in decides by role, even on a device the colleague list has not reached yet.
+ */
+export function canDeleteStudent(staff, me) {
+  return me ? me.role === 'admin' : !multiUserOn(staff);
+}
+
+/**
+ * A deleted student can be brought back for 30 days (2026-11-25: 只有管理者能刪除學生，30 天內可以復原).
+ * The student and every record deleted with them carry deletedWith (the student's id) and the same deletedAt; after
+ * 30 days any device clears what they held (purged) and only the empty records stay.
+ */
+export const DELETE_KEEP_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function deletedOnPurpose(student) {
+  return !!student?.deleted && student.deletedWith === student.id && !!student.deletedAt && !student.purged;
+}
+
+export function isRestorable(student, now = Date.now()) {
+  return deletedOnPurpose(student) && now - student.deletedAt < DELETE_KEEP_DAYS * DAY_MS;
+}
+
+/** Whole days left to bring a deleted student back, at least 1 while it still can be. */
+export function restoreDaysLeft(student, now = Date.now()) {
+  return Math.max(1, Math.ceil((student.deletedAt + DELETE_KEEP_DAYS * DAY_MS - now) / DAY_MS));
+}
+
+/** Students that can still be brought back, the latest deleted first. */
+export function recentlyDeleted(students, now = Date.now()) {
+  return students.filter((s) => isRestorable(s, now)).sort((a, b) => b.deletedAt - a.deletedAt);
+}
+
+/** Students deleted 30 days ago or more whose content is still kept. */
+export function dueForPurge(students, now = Date.now()) {
+  return students.filter((s) => deletedOnPurpose(s) && now - s.deletedAt >= DELETE_KEEP_DAYS * DAY_MS);
+}
+
+/**
+ * The deleted student a booking is for, while they can still be brought back. Such a booking does not make a new
+ * student card, or bringing the old one back would leave two of the same name. A birthday in the title must match.
+ */
+export function deletedForBooking(students, event, now = Date.now()) {
+  const name = String(event?.student || '').trim();
+  if (!name || studentForEvent(students, event)) return null;
+  const same = recentlyDeleted(students, now).filter((s) => s.name === name || (s.aliases || []).includes(name));
+  return (event.birthday ? same.find((s) => s.birthday === event.birthday) : same[0]) || null;
+}
+
+/**
+ * Who opened or changed which student (2026-11-25). The Apps Script writes each entry from the login code of the
+ * request, and the same person doing the same thing to the same student within 30 minutes is one entry (at to to).
+ */
+export const SEEN_GAP_MS = 30 * 60 * 1000;
+
+const LOG_WHAT = { students: '改了學生資料', plans: '改了課表', photos: '改了照片影片', assign: '改了負責老師' };
+const LOG_ACT = { view: '看過', add: '新增學生', delete: '刪除學生', restore: '復原學生', merge: '併入另一位學生' };
+// Two teachers changed the same field before either saw the other's (2026-11-26, v47); the older one gave way.
+const CONFLICT_TEXT = '和別人同時改了';
+
+// Which part of the student details a field is (2026-11-26: App 記下誰改了什麼). Unlisted fields are bookkeeping.
+const FIELD_PARTS = {
+  name: '姓名', aliases: '日曆其他寫法', birthday: '生日', job: '生活與運動', sports: '生活與運動', dailyNeeds: '生活與運動',
+  contraindications: '疼痛與禁忌', pain: '疼痛與禁忌', goal: '訓練目標', nextNotes: '下次要注意', assessments: '動作問題',
+  bodyComp: '身體組成', packageSize: '第幾堂', classStart: '第幾堂', classCount: '第幾堂', nextClassDate: '下次上課',
+  nextClassTime: '下次上課', archived: '封存',
+};
+
+/** The parts of the student details a log entry changed, each once: ['訓練目標', '疼痛與禁忌']. */
+export function changedParts(fields = []) {
+  return [...new Set(fields.map((f) => FIELD_PARTS[f] || (f.startsWith('term_') ? '第幾堂' : '')).filter(Boolean))];
+}
+
+export function logActText(entry) {
+  if (entry.act === 'conflict') {
+    const parts = changedParts((entry.lost || []).map((l) => String(l.field || '').split(':')[0]));
+    return `${CONFLICT_TEXT}${parts.join('、') || '學生資料'}，留下比較新的`;
+  }
+  if (entry.act !== 'edit') return LOG_ACT[entry.act] || '';
+  if (entry.what === 'sessions') return entry.day ? `改了 ${dateWithWeek(entry.day)} 的上課紀錄` : '改了上課紀錄';
+  const parts = entry.what === 'students' ? changedParts(entry.fields) : [];
+  if (parts.length) return `改了${parts.join('、')}`;
+  return LOG_WHAT[entry.what] || '改了資料';
+}
+
+function clock(ms) {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** 14:03, or 14:03–14:50 when the entry spans a while. */
+export function logTimeText(entry) {
+  const from = clock(entry.at);
+  const to = entry.to ? clock(entry.to) : from;
+  return to === from ? from : `${from}–${to}`;
+}
+
+const LOST_LIMIT = 300;
+
+function shortText(text) {
+  const value = String(text).trim();
+  return value.length > LOST_LIMIT ? `${value.slice(0, LOST_LIMIT)}…` : value;
+}
+
+/**
+ * What a change that gave way said, for the access log (2026-11-26: 舊的在「誰改過」看得到). Text shows as it was;
+ * the pain map as its parts and notes; a movement-problem assessment as its date and problems.
+ */
+export function lostValueText(field, value) {
+  if (value === null || value === undefined || value === '') return '（空白）';
+  // The cloud keeps at most 4000 characters of the JSON; a long text shows its start.
+  if (typeof value === 'object' && !Array.isArray(value) && typeof value.clipped === 'string') {
+    return shortText(value.clipped.replace(/^"/, '').replace(/\\n/g, '\n').replace(/\\"/g, '"'));
+  }
+  const name = String(field || '').split(':')[0];
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return shortText(value) || '（空白）';
+  if (Array.isArray(value) && value.every((v) => typeof v === 'string' || typeof v === 'number')) return shortText(value.join('、')) || '（空白）';
+  if (name === 'pain' && typeof value === 'object') return shortText([painText(value), painNoteText(value)].filter(Boolean).join('；')) || '（空白）';
+  if (name === 'assessments' && typeof value === 'object') {
+    const problems = (value.problems || []).map((p) => p?.text).filter(Boolean);
+    return shortText([value.date, problems.join('、'), value.summary].filter(Boolean).join('：')) || '（空白）';
+  }
+  if (name === 'bodyComp' && typeof value === 'object') {
+    return shortText([value.date, value.weight && `體重 ${value.weight}`, value.fat && `體脂 ${value.fat}`, value.muscle && `肌肉量 ${value.muscle}`].filter(Boolean).join(' ')) || '（空白）';
+  }
+  return '（表格內容，畫面上無法顯示）';
+}
+
+/** One lost value's heading: 「被蓋掉的訓練目標（老師乙 14:03 改的）」. `who` is whoever wrote it, or '' when unknown. */
+export function lostValueLabel(lost, who) {
+  const part = changedParts([String(lost.field || '').split(':')[0]])[0] || '內容';
+  return `被蓋掉的${part}（${who || '另一位'}${lost.at ? ` ${clock(lost.at)}` : ''} 改的）`;
+}
+
+/**
+ * Who wrote a value that gave way (2026-11-26). The entry's own colleague when it was theirs; otherwise the colleague
+ * whose logged change of that student's field covers its time. '' when the log does not say.
+ */
+export function lostValueWriter(entries, entry, lost) {
+  if (lost.mine) return entry.by;
+  const field = String(lost.field || '').split(':')[0];
+  const match = entries.find((e) => e !== entry && e.act === 'edit' && e.what === 'students' && e.student === entry.student
+    && e.by !== entry.by && (e.fields || []).includes(field) && e.at <= lost.at && lost.at <= (e.to || e.at));
+  return match ? match.by : '';
+}
+
+/**
+ * What waits on this iPad for the cloud (2026-11-26, v47 不怕丟資料). Each queued change carries who was signed in
+ * (`by`, '' before colleagues); only that person's go up, so a shared iPad never sends one teacher's class under the
+ * next one's login, which the cloud would refuse. Changes someone else left wait for them, counted by person.
+ */
+export const LATE_UPLOAD_MS = 24 * 60 * 60 * 1000;
+
+export function sendsNow(item, signedInId = '') {
+  return !item.by || item.by === (signedInId || '');
+}
+
+/** { mine, others: { staffId: n }, oldest, late }: late once one's own change has waited a day. */
+export function waitingSummary(items, signedInId = '', now = Date.now()) {
+  let mine = 0;
+  let oldest = 0;
+  const others = {};
+  for (const item of items) {
+    if (sendsNow(item, signedInId)) {
+      mine += 1;
+      const at = item.at || now;
+      if (!oldest || at < oldest) oldest = at;
+    } else others[item.by] = (others[item.by] || 0) + 1;
+  }
+  return { mine, others, oldest, late: mine > 0 && now - oldest >= LATE_UPLOAD_MS };
+}
+
+function nameIn(staff, id) {
+  return staff.find((p) => p.id === id)?.name || '另一位同事';
+}
+
+/** 「另外有老師甲的 3 筆紀錄，等老師甲在這台 iPad 登入後上傳」, or '' when nobody else left any. */
+export function othersWaitingText(others = {}, staff = []) {
+  const rows = Object.entries(others || {}).filter(([, n]) => n > 0);
+  if (!rows.length) return '';
+  if (rows.length === 1) {
+    const name = nameIn(staff, rows[0][0]);
+    return `另外有${name}的 ${rows[0][1]} 筆紀錄，等${name}在這台 iPad 登入後上傳`;
+  }
+  return `另外有${rows.map(([id, n]) => `${nameIn(staff, id)} ${n} 筆`).join('、')}紀錄，等他們在這台 iPad 登入後上傳`;
+}
+
+/** 今天 14:03、昨天 09:10、11/20（6 天前）. */
+export function lastSyncText(at, now = Date.now()) {
+  if (!at) return '還沒同步過';
+  const day = (ms) => { const d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+  const days = Math.round((day(now) - day(at)) / DAY_MS);
+  if (days <= 0) return `今天 ${clock(at)}`;
+  if (days === 1) return `昨天 ${clock(at)}`;
+  const d = new Date(at);
+  return `${d.getMonth() + 1}/${d.getDate()}（${days} 天前）`;
+}
+
+/**
+ * One colleague as the cloud last heard of them (2026-11-26), for the admin before disabling someone: when they last
+ * synced, and what their iPads still held then. A shared iPad counts by its latest report, so what one teacher left
+ * there is counted once even after several others signed in.
+ */
+export function deviceSummary(devices = [], staffId = '', now = Date.now()) {
+  let lastAt = 0;
+  const latest = new Map();
+  for (const d of devices || []) {
+    if (!d || !d.id) continue;
+    if (d.by === staffId && d.at > lastAt) lastAt = d.at;
+    if (!latest.has(d.id) || d.at > latest.get(d.id).at) latest.set(d.id, d);
+  }
+  let records = 0;
+  let photos = 0;
+  for (const d of latest.values()) {
+    if (d.by === staffId) { records += d.records || 0; photos += d.photos || 0; }
+    else records += (d.others || {})[staffId] || 0;
+  }
+  return { lastAt, records, photos, text: lastSyncText(lastAt, now) };
+}
+
+/** 「還有 3 筆紀錄、1 個照片影片沒上傳」, or ''. */
+export function leftText(records = 0, photos = 0) {
+  const bits = [records > 0 && `${records} 筆紀錄`, photos > 0 && `${photos} 個照片影片`].filter(Boolean);
+  return bits.length ? `還有 ${bits.join('、')}沒上傳` : '';
+}
+
+/** Entries by day (the day each one began), the latest day and entry first. */
+export function logDays(entries) {
+  const days = new Map();
+  for (const entry of [...entries].sort((a, b) => (b.to || b.at) - (a.to || a.at))) {
+    const day = dateKey(new Date(entry.at));
+    if (!days.has(day)) days.set(day, []);
+    days.get(day).push(entry);
+  }
+  return [...days.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([day, list]) => ({ day, entries: list }));
+}
+
+/**
+ * Who teaches whom (2026-11-24): one record per student and colleague in options, so two iPads adding different
+ * teachers never overwrite each other. A removed teacher keeps the record with deleted set, which syncs the removal.
+ */
+export function assignmentId(studentId, staffId) {
+  return `as_${studentId}_${staffId}`;
+}
+
+/**
+ * Who taught a class. Classes carry the colleague signed in when they began (2026-11-24); classes from before
+ * colleagues shared the app were all taught by the teacher who set it up, the first admin. '' when unknown.
+ */
+export function classTeacherId(session, staff) {
+  return session?.staffId || staff.find((s) => s.first)?.id || '';
+}
+
+/**
+ * Whether the person using this iPad may change a class (2026-11-26: 其他老師的上課紀錄看得到，但只能改自己上的課).
+ * Admins too: they see everyone's classes but change only their own. Before colleagues, everything is the teacher's.
+ */
+export function ownsClass(session, staff, me) {
+  return !me || classTeacherId(session, staff) === me.id;
+}
+
+/**
+ * Each teacher plans their own next class (2026-11-26): the strength teacher's plan is not the Pilates teacher's.
+ * The first admin keeps the plans from before, named by the student; anyone else's is named `student~teacher`.
+ */
+export function planIdFor(studentId, staffId, staff) {
+  if (!staffId || staff.find((s) => s.first)?.id === staffId) return studentId;
+  return `${studentId}~${staffId}`;
+}
+
+/** Whose student a plan is for: plans from before are named by the student. */
+export function planStudentId(plan) {
+  return plan?.studentId || plan?.id || '';
+}
+
+/**
+ * The classes a teacher starts a class or a plan from: their own, newest first. Without any of their own yet (a new
+ * teacher, a substitute) the student's classes of the same kind, so a Pilates teacher does not start from squats.
+ */
+export function ownHistory(history, staff, me, kind = '') {
+  if (!me) return history;
+  const own = history.filter((s) => classTeacherId(s, staff) === me.id);
+  if (own.length) return own;
+  return kind ? history.filter((s) => s.kind === kind) : history;
+}
+
+/*
+ * 第幾堂 (2026-11-25 sixth form): a student's teachers count together, or each their own (各算各的: every teacher
+ * counts from class 1 and has their own term size). The first admin keeps the student's own packageSize and
+ * classStart; another teacher's sit in `term_<id>`, a field of its own so two iPads never overwrite each other's.
+ */
+export function countsSeparately(student) {
+  return student?.classCount === 'separate';
+}
+
+function ownTerm(student, staffId, staff) {
+  return countsSeparately(student) && staffId && staff.find((s) => s.first)?.id !== staffId;
+}
+
+/** The term size and hand-set start a teacher counts with. */
+export function termFor(student, staffId, staff) {
+  if (!ownTerm(student, staffId, staff)) return { packageSize: student?.packageSize, classStart: student?.classStart || null };
+  const own = student[`term_${staffId}`] || {};
+  return { packageSize: own.packageSize || student.packageSize, classStart: own.classStart || null };
+}
+
+/** The fields to save for a teacher's term size or start. */
+export function termFields(student, staffId, staff, term) {
+  if (!ownTerm(student, staffId, staff)) return term;
+  return { [`term_${staffId}`]: { ...(student[`term_${staffId}`] || {}), ...term } };
+}
+
+/** The classes that count towards a teacher's number. */
+export function countedClasses(history, student, staffId, staff) {
+  return countsSeparately(student) && staffId ? history.filter((s) => classTeacherId(s, staff) === staffId) : history;
+}
+
+/** The number a teacher's next class gets, counted together or on its own. */
+export function classCountFor(history, student, staffId, staff) {
+  return nextClassNumber(countedClasses(history, student, staffId, staff), { ...student, ...termFor(student, staffId, staff) });
+}
+
+/**
+ * Whose count a screen shows: the colleague using the iPad, unless the student counts separately and someone else
+ * teaches them (an admin looking in), then the teacher of the latest class.
+ */
+export function countViewerId(student, history, staff, me, teacherIds = []) {
+  if (!me) return '';
+  if (!countsSeparately(student) || teacherIds.includes(me.id)) return me.id;
+  if (history.some((s) => classTeacherId(s, staff) === me.id)) return me.id;
+  return classTeacherId(history[0], staff) || me.id;
+}
+
+/** The classes of the term running now, newest first: back to the latest class numbered 1. */
+export function currentTermClasses(history) {
+  const start = history.findIndex((s) => s.classNo === 1);
+  return start === -1 ? history : history.slice(0, start + 1);
+}
+
+/**
+ * Switching to 各算各的 (2026-11-26: 中途換的話要有機制防止記錯堂數). The numbers so far were shared, so each teacher's
+ * next number is worked out again from their own classes of this term only: a teacher who joined at class 9 and
+ * taught twice goes on with class 3, not 11. The teachers check it once before the switch is saved.
+ */
+export function separateStart(history, staffId, staff, size) {
+  const own = currentTermClasses(history).filter((s) => classTeacherId(s, staff) === staffId);
+  return { no: (own.length % size) + 1, size, taught: own.length, last: own[0] || null };
+}
+
+/** Switching back to 一起算: everyone goes on from the latest class, whoever taught it. */
+export function togetherStart(history, student) {
+  const next = nextClassNumber(history, { ...student, classStart: null });
+  return { no: next.no, size: next.size, last: history[0] || null };
+}
+
+/**
+ * Whether a class was numbered before the student's count last switched between 一起算 and 各算各的, so its number
+ * follows the other way of counting (乙's 第 10 堂 under 一起算 is followed by their 第 3 堂). A class on the day of the
+ * switch counts as before when it was last saved before it.
+ */
+export function numberedBeforeSwitch(student, session) {
+  const at = student?.classCount ? student.fieldAt?.classCount : 0;
+  if (!at || !session?.date) return false;
+  const day = dateKey(new Date(at));
+  return session.date < day || (session.date === day && (session.updatedAt || 0) <= at);
+}
+
+/**
+ * Whether this iPad makes a class's PDF. Only the teacher who taught it has their signature on their iPad, so each
+ * makes their own; an admin also makes those of colleagues who can no longer sign in, so none is left undone.
+ */
+export function makesRecordFor(session, staff, me) {
+  if (!me) return true;
+  const id = classTeacherId(session, staff);
+  return id === me.id || (me.role === 'admin' && !staff.some((s) => s.id === id && !s.disabled));
+}
+
+/** The ids of the colleagues teaching a student, in the order they were added. */
+export function teachersOf(options, studentId) {
+  return options.filter((o) => o.type === 'assign' && !o.deleted && o.studentId === studentId).map((o) => o.staffId);
+}
+
+/**
+ * The students this colleague sees (2026-11-24): a teacher their own; an admin their own plus anyone left without a
+ * teacher who can sign in, so nobody goes missing, or everybody with `everyone`. Before anyone signs in (one teacher,
+ * no colleagues yet) every student shows. Demo students are on each iPad for practice and show for everyone.
+ */
+export function visibleStudents(students, options, staff, me, everyone = false) {
+  if (!me || (me.role === 'admin' && everyone)) return students;
+  const active = new Set(staff.filter((s) => !s.disabled).map((s) => s.id));
+  const teachers = new Map();
+  for (const o of options) {
+    if (o.type !== 'assign' || o.deleted) continue;
+    if (!teachers.has(o.studentId)) teachers.set(o.studentId, []);
+    teachers.get(o.studentId).push(o.staffId);
+  }
+  return students.filter((student) => {
+    if (student.demo) return true;
+    const ids = teachers.get(student.id) || [];
+    if (ids.includes(me.id)) return true;
+    return me.role === 'admin' && !ids.some((id) => active.has(id));
+  });
+}
+
+/** The pairing code as Apps Script prints it: URL-safe base64 of JSON. Also carries a colleague's login (part 2). */
+export function encodePairing(value) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Reads a pairing code, alone or inside the whole letter an admin sent (the longest run of code letters wins).
+ * Returns null when there is none.
+ */
+export function decodePairing(text) {
+  const runs = String(text || '').match(/[A-Za-z0-9_-]{40,}={0,2}/g) || [];
+  for (const run of runs.sort((a, b) => b.length - a.length)) {
+    try {
+      const plain = run.replace(/=+$/, '').replace(/-/g, '+').replace(/_/g, '/');
+      const bytes = Uint8Array.from(atob(plain + '='.repeat((4 - (plain.length % 4)) % 4)), (c) => c.charCodeAt(0));
+      const value = JSON.parse(new TextDecoder().decode(bytes));
+      if (value?.url && value?.key) return value;
+    } catch { /* not this run */ }
+  }
+  return null;
+}
+
+/** A colleague's invitation: this device's connection, their own name, and their login code. */
+export function invitationCode(connection, person, code) {
+  return encodePairing({ ...connection, teacher: person.name, staff: { id: person.id, code: normalizeLoginCode(code) } });
 }
 
 export function addDays(key, days) {
@@ -590,6 +1136,29 @@ export function springFromText(text) {
   return spring;
 }
 
+/**
+ * A saved setting with only what this apparatus has, so an old Reformer value with a bar (2r1b m) reads 2r1b now
+ * that the bar is gone (2026-11-26). Colours and holes of another apparatus are left out too.
+ */
+export function springForApparatus(text, apparatus) {
+  const spring = springFromText(text);
+  const set = springSet(apparatus);
+  return springToText({
+    counts: Object.fromEntries(set.colors.map((c) => [c, spring.counts[c] || 0])),
+    holes: Object.fromEntries(set.colors.filter((c) => set.holes.includes(spring.holes[c])).map((c) => [c, spring.holes[c]])),
+    bar: set.positions.includes(spring.bar) ? spring.bar : '',
+  }, apparatus);
+}
+
+/**
+ * The Reformer bar left out of an old setting (2r1b m → 2r1b), for a plan made from an earlier class. Chair holes are
+ * capitals and stay. No apparatus has a bar any more, so this needs no apparatus.
+ */
+export function springWithoutBar(text) {
+  const value = String(text || '');
+  return springFromText(value).bar ? value.replace(/\s*[lmh]\s*$/, '') : value;
+}
+
 /** Whether a saved setting can be used on an apparatus, so Chair presets never show on the Reformer. */
 export function springFits(text, apparatus) {
   const spring = springFromText(text);
@@ -612,6 +1181,120 @@ export function mergeRecords(existing, incoming) {
     }
   }
   return { records: [...byId.values()], changed };
+}
+
+/*
+ * Student details merge field by field (2026-11-26). With several teachers on one student, two iPads changing
+ * different fields (one the goal, the other the pain map) both keep their change; only the same field changed in both
+ * places goes to the later one. Each record carries fieldAt: when each field last changed. The lists of movement
+ * assessments and body measurements go one item further (`assessments:as_1`), so two teachers each adding one keep
+ * both; an item taken out leaves its time behind, so it stays out. Records from before have no fieldAt and count as
+ * changed all at once at updatedAt. The Apps Script does the same (mergeStudent_ in Code.gs).
+ */
+export const STUDENT_LIST_FIELDS = { assessments: 'id', bodyComp: 'date' };
+const STUDENT_META = new Set(['id', 'updatedAt', 'fieldAt']);
+
+/** JSON with object keys sorted, so the same value written in a different key order counts as the same. */
+export function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().filter((k) => value[k] !== undefined).map((k) => `${JSON.stringify(k)}:${stableJson(value[k])}`).join(',')}}`;
+  }
+  return value === undefined ? 'null' : JSON.stringify(value);
+}
+
+const sameValue = (a, b) => stableJson(a) === stableJson(b);
+const fieldKeys = (record) => Object.keys(record || {}).filter((k) => !STUDENT_META.has(k));
+const listItems = (list, by) => (Array.isArray(list) && list.every((item) => item && item[by] !== undefined && item[by] !== null)
+  ? new Map(list.map((item) => [String(item[by]), item])) : null);
+const hasItemTimes = (record, field) => Object.keys(record?.fieldAt || {}).some((k) => k.startsWith(`${field}:`));
+
+/** When a field last changed in this copy; a copy from before fieldAt changed everything at updatedAt. */
+function fieldTime(record, key) {
+  if (!record.fieldAt) return record.updatedAt || 0;
+  return record.fieldAt[key] ?? -1;
+}
+
+/** The times of the fields a save changed, on top of what the copy before it had. */
+export function stampFields(before, after, now) {
+  const fieldAt = before ? { ...(before.fieldAt || Object.fromEntries(fieldKeys(before).map((k) => [k, before.updatedAt || 0]))) } : {};
+  const keys = new Set([...fieldKeys(before), ...fieldKeys(after)]);
+  for (const key of keys) {
+    const changed = !before || !sameValue(before[key], after[key]);
+    if (!changed) continue;
+    const by = STUDENT_LIST_FIELDS[key];
+    const items = by && listItems(after[key] || [], by);
+    if (items) {
+      const was = (before && listItems(before[key] || [], by)) || new Map();
+      // The first time a list gets item times, the items nobody touched keep the list's old time.
+      const first = !hasItemTimes({ fieldAt }, key);
+      const old = Math.max(fieldAt[key] ?? 0, 0);
+      for (const id of new Set([...was.keys(), ...items.keys()])) {
+        if (!sameValue(was.get(id), items.get(id))) fieldAt[`${key}:${id}`] = now;
+        else if (first) fieldAt[`${key}:${id}`] = old;
+      }
+    }
+    fieldAt[key] = now;
+  }
+  return fieldAt;
+}
+
+function mergeList(a, b, key, fieldAt) {
+  const by = STUDENT_LIST_FIELDS[key];
+  const itemsA = listItems(a[key], by) || new Map();
+  const itemsB = listItems(b[key], by) || new Map();
+  const itemTime = (record, items, id) => {
+    const stamp = record.fieldAt?.[`${key}:${id}`];
+    if (stamp !== undefined) return stamp;
+    // With item times, an item this copy never had is one it did not know about; without, the list is as of its time.
+    if (hasItemTimes(record, key)) return items.has(id) ? fieldTime(record, key) : -1;
+    return fieldTime(record, key);
+  };
+  const ids = new Set([...itemsA.keys(), ...itemsB.keys(),
+    ...[a, b].flatMap((r) => Object.keys(r.fieldAt || {}).filter((k) => k.startsWith(`${key}:`)).map((k) => k.slice(key.length + 1)))]);
+  const kept = new Map();
+  for (const id of ids) {
+    const ta = itemTime(a, itemsA, id);
+    const tb = itemTime(b, itemsB, id);
+    const win = tb >= ta ? itemsB : itemsA;
+    if (Math.max(ta, tb) >= 0) fieldAt[`${key}:${id}`] = Math.max(ta, tb);
+    if (win.has(id)) kept.set(id, win.get(id));
+  }
+  // The newer copy's order, then anything only the other copy has.
+  const first = fieldTime(b, key) >= fieldTime(a, key) ? itemsB : itemsA;
+  const order = [...first.keys(), ...ids];
+  return [...new Set(order)].filter((id) => kept.has(id)).map((id) => kept.get(id));
+}
+
+/** One copy of a student from two, field by field; on a tie the incoming copy b wins. A cleared copy wins outright. */
+export function mergeStudent(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  if (a.purged || b.purged) return b.purged ? b : a;
+  const out = { id: b.id };
+  const fieldAt = {};
+  const keys = new Set([...fieldKeys(a), ...fieldKeys(b),
+    ...[a, b].flatMap((r) => Object.keys(r.fieldAt || {}).filter((k) => !k.includes(':')))]);
+  for (const key of keys) {
+    const ta = fieldTime(a, key);
+    const tb = fieldTime(b, key);
+    const win = tb >= ta ? b : a;
+    if (Math.max(ta, tb) >= 0) fieldAt[key] = Math.max(ta, tb);
+    const by = STUDENT_LIST_FIELDS[key];
+    if (by && listItems(a[key] || [], by) && listItems(b[key] || [], by) && (hasItemTimes(a, key) || hasItemTimes(b, key))) {
+      const list = mergeList(a, b, key, fieldAt);
+      if (key in win || list.length) out[key] = list;
+    } else if (key in win) out[key] = win[key];
+  }
+  out.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0);
+  out.fieldAt = fieldAt;
+  return out;
+}
+
+/** Same content, leaving out when it and its fields were saved. */
+export function sameStudent(a, b) {
+  const strip = (r) => r && Object.fromEntries(Object.entries(r).filter(([k]) => k !== 'updatedAt' && k !== 'fieldAt'));
+  return stableJson(strip(a)) === stableJson(strip(b));
 }
 
 export function fileForRecord(collection, record) {
@@ -674,7 +1357,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v41';
+export const APP_VERSION = 'v48';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -808,6 +1491,59 @@ export function planCalendarWeeks(need, today) {
 }
 
 /**
+ * Every booking after today for the calendar on 今日, with what it needs (2026-11-26, 篩選：全部、未排課、已排課、請假):
+ * the student's next class is 'need' until it has a plan and 'planned' after; a later class of the same student is
+ * 'wait', since a plan is only for the next class; a booking with a reason in brackets is 'leave'. Students still to
+ * come today (waitIds) wait as well, because a plan written now goes to today's class. events come sorted by time.
+ */
+export function planCalendarItems(events, students, plans, today, waitIds = new Set()) {
+  const seen = new Set();
+  const items = [];
+  for (const event of events) {
+    if (event.date <= today) continue;
+    const student = studentForEvent(students, event);
+    if (!student) continue;
+    if (event.change) { items.push({ student, event, state: 'leave' }); continue; }
+    if (seen.has(student.id) || waitIds.has(student.id)) { items.push({ student, event, state: 'wait' }); continue; }
+    seen.add(student.id);
+    const plan = plans.find((p) => p.id === student.id);
+    items.push({ student, event, state: plan && !plan.used && plan.rows?.length ? 'planned' : 'need' });
+  }
+  return items;
+}
+
+/** The calendar's four filters, in the order the teacher asked for them. 全部 shows the waiting classes too. */
+export const PLAN_FILTERS = [['all', '全部'], ['need', '還沒排'], ['planned', '已排'], ['leave', '請假']];
+
+export function filterPlanItems(items, filter) {
+  return filter === 'all' || !PLAN_FILTERS.some(([key]) => key === filter) ? items : items.filter((item) => item.state === filter);
+}
+
+/**
+ * 今天狀況 in detail (2026-11-26): 睡眠、飲食、心情 each open a list to pick from and a note. The lists are a first
+ * draft for the teacher to confirm (CLAUDE.md 待使用者提供).
+ */
+export const STATUS_DETAILS = {
+  sleep: ['睡不到 6 小時', '不好入睡', '半夜醒來', '太早醒', '睡醒還是累'],
+  diet: ['還沒吃東西', '剛吃飽', '吃得比平常少', '水喝得少', '喝了咖啡或茶'],
+  mood: ['壓力大', '很疲倦', '緊張焦慮', '心情低落', '煩躁'],
+};
+export const STATUS_NAMES = { pain: '疼痛', sleep: '睡眠', diet: '飲食', mood: '心情' };
+
+/** What was picked and written for one of 睡眠、飲食、心情 in a class; empty when nothing was. */
+export function statusDetail(session, key) {
+  const detail = session?.flagDetails?.[key] || {};
+  return { items: (detail.items || []).filter(Boolean), note: String(detail.note || '').trim() };
+}
+
+/** 睡眠（不好入睡、半夜醒來；昨晚加班） for one marked flag, or just 睡眠 when nothing more was noted. */
+export function statusText(session, key) {
+  const { items, note } = statusDetail(session, key);
+  const more = [items.join('、'), note].filter(Boolean).join('；');
+  return more ? `${STATUS_NAMES[key]}（${more}）` : STATUS_NAMES[key];
+}
+
+/**
  * The calendar's bookings plus the sample ones (示範資料). Those are in no calendar, so a sync while connected would
  * otherwise drop them within minutes; they stay until the sample is cleared (2026-11-24).
  */
@@ -871,7 +1607,7 @@ export function planForPartner(rows, history) {
     const done = own.sets.filter((set) => set.done);
     copy.sets = row.sets.map((set, i) => {
       const from = done[Math.min(i, done.length - 1)];
-      return makeSet({ weight: from.weight, reps: from.reps, spring: from.spring });
+      return makeSet({ weight: from.weight, reps: from.reps, spring: springWithoutBar(from.spring) });
     });
     if (own.band) copy.band = own.band;
     return copy;
@@ -1016,6 +1752,22 @@ export function setText(row, set) {
   return `${setLoad(row, set)}×${set.reps}`;
 }
 
+// A plan note's usual words are split off at Chinese and Western list marks, never at spaces, so English text
+// such as "keep neutral spine" stays whole (2026-11-26).
+const NOTE_SEP = /[、，,；;\n]+/;
+
+/** Whether one of the usual notes (腰代償) is already in a plan note. */
+export function noteHasTag(text, tag) {
+  return String(text || '').split(NOTE_SEP).map((part) => part.trim()).includes(tag);
+}
+
+/** Adds a usual note to the end of a plan note, or takes it back out when it is there. */
+export function toggleNoteTag(text, tag) {
+  const value = String(text || '').trim();
+  if (noteHasTag(value, tag)) return value.split(NOTE_SEP).map((part) => part.trim()).filter((part) => part && part !== tag).join('、');
+  return value ? `${value}、${tag}` : tag;
+}
+
 /** Everything noted about one exercise in one class, for history lists and the PDF. */
 export function rowDetails(row) {
   const pain = painText(row);
@@ -1029,6 +1781,7 @@ export function rowDetails(row) {
     row.assist ? `協助 ${row.assist}` : '',
     ...(row.props || []),
     ...(row.tags || []),
+    row.planNote ? `排課備註：${row.planNote}` : '',
   ].filter(Boolean);
 }
 
@@ -1122,13 +1875,17 @@ export function learnAlternative(exercise, replacementId, limit = 8) {
   return [replacementId, ...(exercise.alternatives || []).filter((id) => id !== replacementId)].slice(0, limit);
 }
 
-/** The spring settings used most, so a usual setting takes one tap. */
-export function commonSprings(sessions, limit = 6, keep = () => true) {
+/**
+ * The spring settings used most, so a usual setting takes one tap. `tidy` rewrites each one first, so old values
+ * that differ only in what is no longer written (the Reformer bar) count as one.
+ */
+export function commonSprings(sessions, limit = 6, keep = () => true, tidy = (text) => text) {
   const counts = new Map();
   for (const session of sessions) {
     for (const row of (session.rows || []).filter(keep)) {
       for (const set of row.sets || []) {
-        if (set.spring) counts.set(set.spring, (counts.get(set.spring) || 0) + 1);
+        const text = set.spring && tidy(set.spring);
+        if (text) counts.set(text, (counts.get(text) || 0) + 1);
       }
     }
   }

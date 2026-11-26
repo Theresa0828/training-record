@@ -1,6 +1,6 @@
 // How a past class is shown: on the overview's list and beside the plan for reference.
 import { h } from './dom.js';
-import { classLabel, isBpFlagged, painNoteText, painText, rowDetails, setText } from './core.js';
+import { classLabel, isBpFlagged, painNoteText, painText, rowDetails, setText, statusText } from './core.js';
 import { kindLabel } from './today.js';
 import { icon } from './icons.js';
 
@@ -32,8 +32,9 @@ export function sessionFacts(session) {
     session.hr ? `心跳 ${session.hr}` : '',
   ].filter(Boolean).join('・');
   const flags = Object.entries(FLAG_NAMES).filter(([key]) => session.flags?.[key])
-    .map(([key, name]) => (key === 'pain' && session.dayPain && painText(session.dayPain) ? `疼痛（${painText(session.dayPain)}）` : name));
+    .map(([key, name]) => (key === 'pain' ? (session.dayPain && painText(session.dayPain) ? `疼痛（${painText(session.dayPain)}）` : name) : statusText(session, key)));
   return [
+    String(session.classGoal || '').trim() && h('p', {}, `本堂小目標：${session.classGoal.trim()}`),
     vitals && h('p', { class: 'muted' }, vitals),
     flags.length > 0 && h('p', {}, `當天狀況：${flags.join('、')}`),
     session.dayPain && painNoteText(session.dayPain) && h('p', {}, `上課前疼痛附註：${painNoteText(session.dayPain)}`),

@@ -4,8 +4,9 @@
 // has, so a second device never saves the same class twice.
 import * as store from './store.js';
 import { call, isConnected, onStatus } from './sync.js';
-import { dateKey, nextClassInfo, mediaFolderName } from './core.js';
+import { dateKey, nextClassInfo, mediaFolderName, makesRecordFor } from './core.js';
 import { bodyMap } from './bodymap.js';
+import { me, team, classTeacher } from './team.js';
 import { buildRecordHtml, recordFileName, recordJobs, nextAfter, classPainScores, profilePainScores } from './recordhtml.js';
 
 let running = false;
@@ -48,8 +49,12 @@ function savedCount(map) {
   return Object.keys(map).length;
 }
 
+// Each teacher's iPad turns their own classes into PDFs, with their own signature (2026-11-24).
 function pendingJobs() {
-  return recordJobs(store.all('sessions'), store.all('students'), index(), dateKey());
+  const staff = team();
+  const who = me();
+  const sessions = store.all('sessions').filter((s) => makesRecordFor(s, staff, who));
+  return recordJobs(sessions, store.all('students'), index(), dateKey());
 }
 
 /** Draws the two body figures with the pain scores written on them, as a PNG for the PDF. */
@@ -135,8 +140,8 @@ export async function recordPage(session, kind, savedAt = Date.now()) {
     student,
     session,
     partnerName: session.pairWith ? store.get('students', session.pairWith)?.name || '' : '',
-    coachName: store.getMeta('connection')?.teacher || '',
-    coachSignature: store.getMeta('coachSignature'),
+    coachName: classTeacher(session).name,
+    coachSignature: classTeacher(session).signature,
     next: nextAfter(session, sessions, upcoming.date ? upcoming : null),
     images: { dayPain, classPain, profilePain },
     kind,

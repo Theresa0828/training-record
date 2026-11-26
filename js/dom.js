@@ -289,6 +289,32 @@ export function revealField(el, viewport = window.visualViewport) {
   else if (rect.top < freeTop) box.scrollTop -= freeTop - rect.top;
 }
 
+/**
+ * 每次點輸入欄位鍵盤都跳不出來 (2026-11-26): with Apple Pencil and iPad's 隨手寫 (Scribble) on, a field tapped with the
+ * pencil gets iPad's handwriting palette instead of the keyboard. That is iPad's own behaviour, which a page cannot
+ * change, so the first time it happens on this iPad a note says what to do: write in the box, or tap it with a finger.
+ */
+const PEN_HINT_KEY = 'penFieldHint';
+export function installPenHint() {
+  let penAt = -Infinity;
+  document.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'pen' && e.target?.closest?.(TYPED)) penAt = performance.now();
+  }, true);
+  document.addEventListener('focusin', (e) => {
+    const field = e.target;
+    if (!field?.matches?.(TYPED) || performance.now() - penAt > 1000) return;
+    try { if (localStorage.getItem(PEN_HINT_KEY)) return; } catch { return; }
+    setTimeout(() => {
+      // A keyboard at the bottom shrinks the part of the page that shows; the handwriting palette does not.
+      const viewport = window.visualViewport;
+      const covered = viewport ? window.innerHeight - viewport.height - viewport.offsetTop : 0;
+      if (covered > 120 || document.activeElement !== field) return;
+      try { localStorage.setItem(PEN_HINT_KEY, '1'); } catch { /* shown again next time */ }
+      toast('用 Apple Pencil 點欄位，可以直接在框裡寫字；要打字，用手指點一下欄位就會出現鍵盤。', { label: '知道了', run: () => {} });
+    }, 900);
+  });
+}
+
 export function installKeyboardLift() {
   const viewport = window.visualViewport;
   if (!viewport) return;

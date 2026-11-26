@@ -11,6 +11,7 @@ import { termRing, calendarPage } from './charts.js';
 import { bodyMap } from './bodymap.js';
 import { equipmentIcon } from './equipment.js';
 import { icon } from './icons.js';
+import { mine } from './team.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const WEEK = '日一二三四五六';
@@ -28,11 +29,15 @@ function longDate(key) {
   return `${m} 月 ${d} 日（星期${WEEK[new Date(y, m - 1, d).getDay()]}）`;
 }
 
-/** The class to show: the one asked for, else today's once something is done, else the latest finished. */
+/**
+ * The class to show: the one asked for, else today's once something is done (this teacher's own first, when two
+ * teachers had the student today), else the latest finished.
+ */
 function pickSession(studentId, sessionId) {
   const all = store.all('sessions').filter((s) => s.studentId === studentId && !s.deleted);
   if (sessionId) return all.find((s) => s.id === sessionId) || null;
-  const today = all.filter((s) => s.date === dateKey() && s.rows.some((r) => r.sets.some((x) => x.done))).sort((a, b) => (b.finishedAt || b.updatedAt || 0) - (a.finishedAt || a.updatedAt || 0))[0];
+  const today = all.filter((s) => s.date === dateKey() && s.rows.some((r) => r.sets.some((x) => x.done)))
+    .sort((a, b) => (Number(mine(b)) - Number(mine(a))) || (b.finishedAt || b.updatedAt || 0) - (a.finishedAt || a.updatedAt || 0))[0];
   return today || doneSessions(all, studentId)[0] || null;
 }
 
@@ -60,6 +65,14 @@ function whyCard(student, summary) {
     h('span', { class: 'rp-why-arrow', 'aria-hidden': 'true' }, icon('next')),
     h('div', { class: 'rp-why-part' }, h('h3', {}, '所以我們的目標'),
       student.goal ? fitSay(h('p', { class: 'rp-say rp-fit' }, student.goal)) : h('p', { class: 'rp-note' }, '下次和老師一起訂')));
+}
+
+/** 今天的小目標 (2026-11-26): the line the teacher set for this class, told to the student as it was written. */
+function classGoalCard(session) {
+  const goal = String(session.classGoal || '').trim();
+  return goal ? card('span-6 rp-class-goal', null,
+    h('h3', {}, icon('star'), '今天的小目標'),
+    fitSay(h('p', { class: 'rp-say rp-fit' }, goal))) : null;
 }
 
 function termCard(session) {
@@ -247,6 +260,7 @@ export function reportView({ studentId, sessionId }) {
     h('main', { class: 'page bento rp-grid' },
       // With a summary the first row reads "what the teacher saw → so our goal"; the class count and next class share a card.
       ...(summary ? [whyCard(student, summary), termNextCard(session, student)] : [goalCard(student), termCard(session), nextCard(student)]),
+      classGoalCard(session),
       rows.length ? exercisesCard(rows) : card('span-6', '今天做的動作', h('p', { class: 'rp-note' }, '做完第一組就會出現在這裡。')),
       painCard(session, history),
       trend,
