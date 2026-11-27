@@ -1357,7 +1357,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v49';
+export const APP_VERSION = 'v50';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -2415,10 +2415,17 @@ export function startAssessment(student, date, id) {
   return { id, date, problems: [], summary: '', createdAt: Date.now() };
 }
 
-/** The assessment before this one (newest first by date, then by when it was made), or null. */
+/**
+ * The assessment before this one: the newest on an earlier day, or null. Another one on the same day never counts
+ * (2026-11-27: a second 11/27 assessment took the first one's empty summary as 上次 and had nothing to bring in).
+ */
 export function previousAssessment(student, assessment) {
-  return assessmentsByDate(student).find((a) => a.id !== assessment.id
-    && ((a.date || '') < (assessment.date || '') || ((a.date || '') === (assessment.date || '') && (a.createdAt || 0) < (assessment.createdAt || 0)))) || null;
+  return assessmentsByDate(student).find((a) => a.id !== assessment.id && (a.date || '') < (assessment.date || '')) || null;
+}
+
+/** The assessment already written on a day, so 新增評估 opens it instead of starting a second one (2026-11-27). */
+export function assessmentOn(student, date) {
+  return assessmentsByDate(student).find((a) => a.date === date) || null;
 }
 
 /** The problems from before that can be brought in: the ones not solved, in their order. */

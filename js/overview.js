@@ -126,8 +126,9 @@ export function editProfileSheet(student) {
             latest.summary?.trim() && h('p', { class: 'pf-summary' }, h('span', { class: 'muted small' }, '問題總結（給學生看）'), h('span', {}, latest.summary.trim())))
           : h('p', { class: 'muted' }, '還沒評估。評估後記下動作問題，會畫在左邊的人體圖上。'),
         h('div', { class: 'row-wrap' },
-          button(latest ? '新增評估' : '新增第一次評估', () => editAssessment(current(), null, afterAssessment), ''),
-          latest && button([icon('pencil'), h('span', {}, `修改 ${shortDate(latest.date)} 評估`)], () => editAssessment(current(), latest.id, afterAssessment), 'ghost')));
+          // Today's assessment is changed, never doubled (2026-11-27): then only the one button.
+          latest?.date !== dateKey() && button(latest ? '新增評估' : '新增第一次評估', () => editAssessment(current(), null, afterAssessment), ''),
+          latest && button([icon('pencil'), h('span', {}, latest.date === dateKey() ? '修改今天的評估' : `修改 ${shortDate(latest.date)} 評估`)], () => editAssessment(current(), latest.id, afterAssessment), 'ghost')));
     }
 
     // ③ The goal, with what it rests on in view (kept current as the fields above change).

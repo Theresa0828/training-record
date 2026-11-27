@@ -8,7 +8,7 @@ import { bodyMap } from './bodymap.js';
 import { painScores } from './painsheet.js';
 import {
   PROBLEM_STATUS, DEFAULT_PROBLEMS, assessmentsByDate, latestAssessment, startAssessment, problemCountText, problemText,
-  withAssessment, chooserOptions, dateKey, doneSessions, painSeries, newId, previousAssessment, carryCandidates, carryProblem,
+  withAssessment, chooserOptions, dateKey, doneSessions, painSeries, newId, previousAssessment, carryCandidates, carryProblem, assessmentOn,
 } from './core.js';
 
 const STATUS_LABEL = Object.fromEntries(PROBLEM_STATUS);
@@ -98,10 +98,14 @@ export function lifeNeeds(student) {
     .filter((x) => x?.trim()).join('・');
 }
 
-/** Opens one assessment, new (id null) or saved, for writing. Nothing is stored until something changes. */
+/**
+ * Opens one assessment, new (id null) or saved, for writing. Nothing is stored until something changes.
+ * A day has one assessment (2026-11-27): asking for a new one on a day that has one opens that one.
+ */
 export function editAssessment(student, assessmentId = null, onDone = null) {
   const current = () => store.get('students', student.id) || student;
-  const saved = assessmentId && (current().assessments || []).find((a) => a.id === assessmentId);
+  const openId = assessmentId || assessmentOn(current(), dateKey())?.id || null;
+  const saved = openId && (current().assessments || []).find((a) => a.id === openId);
   const a = saved ? JSON.parse(JSON.stringify(saved)) : startAssessment(current(), dateKey(), newId('as'));
   let stored = Boolean(saved);
   const pain = painUnderlay(current());
@@ -281,7 +285,7 @@ export function assessmentSheet(student) {
     const pain = painUnderlay(student);
     const reopen = (id) => { close(); editAssessment(student, id); };
     return h('div', { class: 'stack' },
-      button('新增評估', () => { close(); editAssessment(student); }, 'big primary'),
+      button(latest?.date === dateKey() ? '修改今天的評估' : '新增評估', () => { close(); editAssessment(student); }, 'big primary'),
       latest && h('div', { class: 'stack-sm' },
         h('div', { class: 'row-between' },
           h('strong', {}, `${shortDate(latest.date)} 評估`),
