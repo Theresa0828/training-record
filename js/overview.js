@@ -6,7 +6,7 @@ import { classNumberSheet, nextDateSheet, countModeSheet } from './classinfo.js'
 import {
   dateKey, doneSessions, nextClassNumber, nextClassInfo, findStudentByName, studentForEvent, cleanBirthday, recentPain, painNoteText, learnedSummary, pilatesLevel,
   weightTrends, volumeSeries, ONE_RM_MAX_REPS, painSeries, overallStatus, bodyCompSummary, painList, painText, setPainMap,
-  latestAssessment, problemCountText, problemText, canDeleteStudent, classTeacherId, classCountFor, countViewerId, countsSeparately,
+  latestAssessment, problemCountText, problemText, openProblems, PROBLEM_STATUS, canDeleteStudent, classTeacherId, classCountFor, countViewerId, countsSeparately,
 } from './core.js';
 import { openPainSheet, painScores } from './painsheet.js';
 import { exportPdf } from './print.js';
@@ -410,15 +410,24 @@ function textCard(student, span, title, iconName, value, emptyText, className = 
     : h('span', { class: 'card-text' }, h('span', { class: 'card-empty' }, emptyText)), value ? className : '');
 }
 
-/** Movement problems from the latest assessment (2026-11-23): how many are still there, and the first ones by name. */
+const PROBLEM_LABEL = Object.fromEntries(PROBLEM_STATUS);
+
+/**
+ * Movement problems from the latest assessment. Each one still there is named with its status in front (2026-11-27:
+ * 「還在 3」 did not say what the 3 was, nor which were still there and which were better).
+ */
 function problemCard(student, span) {
   const latest = latestAssessment(student);
-  const open = (latest?.problems || []).filter((p) => p.status !== 'solved');
+  const open = openProblems(latest);
+  const solved = (latest?.problems || []).length - open.length;
+  const shown = open.slice(0, 3);
   return card(span, '動作問題', null, () => (latest ? assessmentSheet(student) : editAssessment(student)), latest
     ? [
-      h('span', { class: 'card-head' }, problemCountText(latest) || '沒有問題'),
-      open.length > 0 && h('span', { class: 'problem-card-list' }, open.slice(0, 2).map((p) => h('span', {}, problemText(p)))),
-      h('span', { class: 'muted small' }, `${shortDate(latest.date)} 評估${open.length > 2 ? `・還有 ${open.length - 2} 個` : ''}`),
+      h('span', { class: 'card-head' }, open.length ? `${open.length} 個問題還沒解決` : (solved ? '問題都解決了' : '沒有問題')),
+      shown.length > 0 && h('span', { class: 'problem-card-list' }, shown.map((p) => h('span', { class: 'problem-card-row' },
+        h('span', { class: `problem-status is-${p.status || 'open'}` }, PROBLEM_LABEL[p.status || 'open']),
+        h('span', { class: 'problem-card-text' }, problemText(p))))),
+      h('span', { class: 'muted small' }, [`${shortDate(latest.date)} 評估`, open.length > 3 && `還有 ${open.length - 3} 個點開看`, solved > 0 && `已解決 ${solved} 個`].filter(Boolean).join('・')),
     ]
     : h('span', { class: 'card-empty' }, '還沒評估，點一下新增'));
 }

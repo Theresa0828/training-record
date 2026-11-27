@@ -6,7 +6,7 @@ import {
   MAX_SETS, DEFAULT_TAGS, DEFAULT_PROPS, chooserOptions, painList, painText, painShort, setPainMap, setText, rowDetails, exerciseHistory, exerciseTrend, ASSIST_LEVELS, dateKey, newId, makeRow, makeSet,
   doneSessions, startingRows, isBpFlagged, expectedDigits, resolveStaleDraft, swapRow, commonSprings, nextClassNumber, classLabel, moveRow, setLoad, equipmentText, BAND, effortLevel,
   bookingFrom, partnerFor, pairClassNumber, planForPartner, rowsFromSession, classTeacherId, classCountFor, termFor, termFields, ownHistory, planIdFor,
-  STATUS_DETAILS, statusDetail, statusText,
+  STATUS_DETAILS, statusDetail, statusText, lastPainRecord, painToFollow, dayPainWritten, hasPain,
 } from './core.js';
 import { kindLabel } from './today.js';
 import { exercisePicker, rememberSwaps } from './library.js';
@@ -162,6 +162,10 @@ export function recordView({ studentId, kind, sessionId }) {
   let session = editing ? JSON.parse(JSON.stringify(original)) : openSession(studentId, kind);
   let dirty = false;
   let uploadState = 'clean';
+  // Set once the teacher has left this screen while an upload runs on, so its result is told in words that fit elsewhere.
+  let gone = false;
+  // What to do once the running upload ends (2026-11-27, 等上傳完再離開).
+  let afterUpload = null;
   // Changes to a past class are kept on this iPad only (never sent) until 存檔上傳, so a closed tab loses nothing.
   const drafts = () => ({ ...(store.getMeta('editDrafts', {}) || {}) });
   const keepDraft = () => store.setMeta('editDrafts', { ...drafts(), [session.id]: { session: JSON.parse(JSON.stringify(session)), savedAt: Date.now() } });
@@ -172,6 +176,11 @@ export function recordView({ studentId, kind, sessionId }) {
     store.setMeta('editDrafts', all);
   };
   const previous = doneSessions(store.all('sessions'), studentId).find((s) => s.id !== session.id && s.date <= session.date);
+  // The pain written last time, from the last class or the profile, to be followed today (2026-11-27).
+  const lastPain = lastPainRecord(store.all('sessions'), student, session);
+  const followPain = () => painToFollow(lastPain) && !dayPainWritten(session);
+  // It opens by itself once, right after the blood pressure; after that the pulsing button is the reminder.
+  let painAsked = false;
   // A 1:2 class: the two names sit at the top and one tap switches (2026-11-24). A past class is edited alone.
   const pair = editing || session.date !== dateKey() ? null : todayPair(studentId);
   const undoStack = [];
@@ -188,7 +197,9 @@ export function recordView({ studentId, kind, sessionId }) {
   const tableBody = h('div', { class: 'grid-body' });
   const vitalsBp = h('button', { type: 'button', class: 'vital', onclick: () => setMode('vitals') });
   const vitalsHr = h('button', { type: 'button', class: 'vital', onclick: () => setMode('vitals') });
-  const vitalsFlags = h('button', { type: 'button', class: 'vital', onclick: () => setMode('vitals') });
+  // 上課前疼痛 has its own button in the top line (2026-11-27): under the blood pressure it was missed when the list was long.
+  const vitalsPain = h('button', { type: 'button', class: 'vital vital-pain', onclick: () => openDayPain() });
+  const vitalsFlags = h('button', { type: 'button', class: 'vital', onclick: () => openDaySheet() });
   const noteButton = h('button', { type: 'button', class: 'vital', onclick: () => openNoteSheet() });
   const undoButton = h('button', { type: 'button', class: 'btn ghost undo', disabled: true, onclick: undo }, icon('undo'), h('span', {}, '復原'));
   const finishButton = editing
@@ -264,27 +275,92 @@ export function recordView({ studentId, kind, sessionId }) {
     const result = await uploadRecord('sessions', session.id);
     uploadState = result === 'offline' ? 'pending' : result;
     paintSave();
+    const date = session.date.slice(5).replace('-', '/');
+    // Off this screen the 再上傳一次 button is out of reach, but the change stays queued and goes up at the next sync.
+    if (gone) {
+      toast({
+        uploaded: `${date} 這堂的修改已上傳到雲端`,
+        local: `${date} 這堂的修改已存在這台 iPad。還沒連 Google，所以沒有上傳。`,
+        offline: `${date} 這堂的修改已存在 iPad，還沒上傳。連上網路後會自動上傳，紀錄清單會標「還沒上傳」。`,
+        pending: `${date} 這堂的修改已存在 iPad，這次沒有上傳成功。下次同步會自動再傳，紀錄清單會標「還沒上傳」。`,
+      }[result]);
+      return;
+    }
+    const then = afterUpload;
+    afterUpload = null;
+    if (then && (result === 'uploaded' || result === 'local')) {
+      exit(then);
+      toast(result === 'uploaded' ? `${date} 這堂的修改已上傳到雲端` : `${date} 這堂的修改已存在這台 iPad。還沒連 Google，所以沒有上傳。`);
+      return;
+    }
     toast({
       uploaded: '已上傳到雲端',
       local: '已存在這台 iPad。還沒連 Google，所以沒有上傳。',
-      offline: '已存在 iPad，但現在沒有網路。連上網路後按「再上傳一次」。',
-      pending: '已存在 iPad，但上傳沒有成功。等一下再按「再上傳一次」。',
+      offline: '已存在 iPad，但現在沒有網路。連上網路後會自動上傳，也可以再按「再上傳一次」。',
+      pending: '已存在 iPad，但上傳沒有成功。下次同步會自動再傳，也可以等一下再按「再上傳一次」。',
     }[result]);
   }
 
-  /** Leaving a past class with changes not uploaded asks first. The changes stay on this iPad unless thrown away. */
+  /** Leaves the screen; an upload still running carries on and says how it ended. */
+  function exit(then) {
+    gone = uploadState === 'uploading';
+    then();
+  }
+
+  /**
+   * Leaving a past class asks first whenever the cloud does not have the change yet (2026-11-27, 返回 without 存檔上傳,
+   * or in the middle of 上傳中): not saved, still uploading, or the upload failed. Nothing is ever thrown away silently.
+   */
   function leave(then) {
-    if (!dirty) { then(); return; }
-    openSheet('還沒存檔', (close) => h('div', { class: 'stack' },
-      h('p', {}, '這堂的修改暫存在這台 iPad，還沒上傳到雲端。'),
+    if (dirty) { askUnsaved(then); return; }
+    if (uploadState === 'uploading') { askUploading(then); return; }
+    if (uploadState === 'pending') { askPending(then); return; }
+    exit(then);
+  }
+
+  /** Changes not saved yet: the main button saves and uploads them, then leaves. */
+  function askUnsaved(then) {
+    openSheet('還沒存檔上傳', (close) => h('div', { class: 'stack' },
+      h('p', {}, `${session.date.slice(5).replace('-', '/')} 這堂改過了，但還沒存檔上傳。雲端上還是原本的內容。`),
       h('div', { class: 'stack' },
-        button('繼續修改', close, 'big primary'),
-        button('先離開，保留暫存', () => {
+        button('存檔上傳，再離開', () => {
           close();
-          toast('修改暫存在這台 iPad。紀錄清單會標「還沒存檔」，記得回來按「存檔上傳」。');
-          then();
-        }, ''),
-        holdButton('放棄修改', () => { dropDraft(); close(); then(); }, 'ghost danger-text'))));
+          upload();
+          exit(then);
+          toast('已存檔，正在上傳。上傳完會告訴你。');
+        }, 'big primary'),
+        button('繼續修改', close, ''),
+        button('先離開，修改暫存在 iPad', () => {
+          close();
+          toast('修改暫存在這台 iPad，還沒存檔。紀錄清單會標「還沒存檔」，記得回來按「存檔上傳」。');
+          exit(then);
+        }, 'ghost'),
+        holdButton('放棄修改', () => { dropDraft(); close(); exit(then); }, 'ghost danger-text'))));
+  }
+
+  /** Still uploading: waiting is the main choice; leaving lets it go on by itself. */
+  function askUploading(then) {
+    openSheet('還在上傳', (close) => h('div', { class: 'stack' },
+      h('p', {}, '修改已經存在這台 iPad，正在上傳到雲端。'),
+      h('p', { class: 'muted' }, '現在離開也會繼續上傳；沒傳成功的，下次同步會自動再傳。'),
+      h('div', { class: 'stack' },
+        button('等上傳完再離開', () => {
+          close();
+          afterUpload = then;
+          // It may have ended while the sheet was open.
+          if (uploadState !== 'uploading') leave(then);
+        }, 'big primary'),
+        button('先離開，讓它繼續上傳', () => { close(); exit(then); }, ''))));
+  }
+
+  /** Saved here but not uploaded: try again, or leave it for the next sync. */
+  function askPending(then) {
+    openSheet('還沒上傳成功', (close) => h('div', { class: 'stack' },
+      h('p', {}, '修改已經存在這台 iPad，但還沒上傳到雲端。'),
+      h('p', { class: 'muted' }, '離開也沒關係，下次同步會自動再傳；紀錄清單會標「還沒上傳」。'),
+      h('div', { class: 'stack' },
+        button('再上傳一次', () => { close(); afterUpload = then; upload(); }, 'big primary'),
+        button('先離開，之後自動上傳', () => { close(); exit(then); }, ''))));
   }
 
   /** A past class with changes left from last time offers to carry on with them. */
@@ -471,7 +547,7 @@ export function recordView({ studentId, kind, sessionId }) {
     cell.classList.remove('is-empty');
     cell.classList.toggle('is-done', set.done);
     cell.classList.toggle('is-changed', changed);
-    cell.classList.toggle('is-next', isSelected && !set.done && mode === 'set');
+    cell.classList.toggle('is-next', isSelected && !set.done && mode === 'set' && !painPulse());
     cell.classList.toggle('is-spring', row.kind === 'pilates');
     a.textContent = setLoad(row, set);
     b.textContent = set.reps;
@@ -504,19 +580,34 @@ export function recordView({ studentId, kind, sessionId }) {
         : (previous?.bpSys ? `上次 ${previous.bpSys}/${previous.bpDia}` : '未量')));
     vitalsHr.replaceChildren(h('span', { class: 'vital-label' }, '心跳'),
       h('span', { class: 'vital-value' }, session.hr || (previous?.hr ? `上次 ${previous.hr}` : '未量')));
-    const marked = STATUS_FLAGS.filter(([key]) => session.flags[key])
-      .map(([key, label]) => (key === 'pain' && painList(session.dayPain || {}).length ? `疼痛 ${painShort(session.dayPain)}` : label));
+    const written = dayPainWritten(session);
+    const hurts = written ? hasPain(painScores(session.dayPain)) : !!session.flags.pain;
+    const painValue = written ? (hurts ? painShort(session.dayPain) : '都不痛')
+      : session.flags.pain ? '有'
+        : painToFollow(lastPain) ? `上次 ${painShort({ painMap: lastPain.scores })}` : '有痛才點';
+    vitalsPain.classList.toggle('is-marked', hurts);
+    vitalsPain.replaceChildren(h('span', { class: 'vital-label' }, '上課前疼痛'), h('span', { class: 'vital-value' }, painValue));
+    vitalsPain.setAttribute('aria-label', `上課前疼痛：${painValue}，點一下記錄`);
+    const marked = STATUS_FLAGS.filter(([key]) => key !== 'pain' && session.flags[key]).map(([, label]) => label);
     vitalsFlags.classList.toggle('is-marked', marked.length > 0);
-    vitalsFlags.replaceChildren(h('span', { class: 'vital-label' }, '今天狀況'),
+    vitalsFlags.replaceChildren(h('span', { class: 'vital-label' }, '睡眠飲食心情'),
       h('span', { class: 'vital-value' }, marked.length ? marked.join('、') : '都正常'));
     noteButton.classList.toggle('is-marked', false);
     noteButton.replaceChildren(h('span', { class: 'vital-label' }, '小目標・備註'),
       h('span', { class: 'vital-value' }, session.classGoal?.trim() || session.note || session.special ? '已寫' : '點這裡寫'));
   }
 
+  /** Whether the pain to follow is the one next step: after the blood pressure, before the first set (2026-11-27). */
+  function painPulse() {
+    if (mode === 'vitals' || !followPain()) return false;
+    const anyDone = session.rows.some((row) => row.sets.some((s) => s.done));
+    return !anyDone && !(session.status === 'draft' && !session.bpSys && !session.hr);
+  }
+
   /** Says in one sentence what to do now, so the screen never leaves the teacher guessing. */
   function guideMessage() {
     if (mode === 'vitals') return '先量血壓和心跳，輸入完會自動跳下一格';
+    if (painPulse()) return '上次有疼痛，先點「上課前疼痛」記今天幾分';
     if (!session.rows.length) return '先加入第一個動作';
     const row = selected && session.rows[selected.row];
     if (editing && isAllDone()) return '改好後按右上角「存檔上傳」';
@@ -542,6 +633,9 @@ export function recordView({ studentId, kind, sessionId }) {
     const vitalsDue = mode === 'vitals' || (session.status === 'draft' && !session.bpSys && !session.hr && !anyDone);
     vitalsBp.classList.toggle('is-next', vitalsDue);
     vitalsHr.classList.toggle('is-next', mode === 'vitals');
+    // The pain to follow pulses until it is written, or until the first set is done; then it only stays outlined.
+    vitalsPain.classList.toggle('is-next', painPulse());
+    vitalsPain.classList.toggle('is-due', followPain() && anyDone);
     addButton.classList.toggle('is-next', !session.rows.length && mode !== 'vitals');
     const message = guideMessage();
     if (message !== lastGuide) {
@@ -707,9 +801,9 @@ export function recordView({ studentId, kind, sessionId }) {
           mutate(() => { set.done = false; });
           refresh();
         }, ''),
-        // Any set can go, down to one; the whole exercise goes with 移除動作 or a swipe (2026-11-16).
-        row.sets.length > 1 && holdButton('刪除這組', removeSet, 'ghost danger-text'),
-        holdButton('移除動作', removeRow, 'ghost danger-text')),
+        // Any set can go, down to one (2026-11-16).
+        // The whole exercise goes only with a swipe (2026-11-27): a second held button beside 刪除這組 was pressed by mistake.
+        row.sets.length > 1 && holdButton('刪除這組', removeSet, 'ghost danger-text')),
     ];
   }
 
@@ -754,10 +848,6 @@ export function recordView({ studentId, kind, sessionId }) {
     toast(`已刪除 ${row.name} 第${number}組`, { label: '復原', run: undo });
   }
 
-  function removeRow() {
-    removeRowAt(selected.row);
-  }
-
   function removeRowAt(r) {
     const name = session.rows[r].name;
     mutate(() => session.rows.splice(r, 1));
@@ -767,6 +857,12 @@ export function recordView({ studentId, kind, sessionId }) {
     buildGrid();
     refresh();
     toast(`已移除 ${name}`, { label: '復原', run: undo });
+  }
+
+  /** After the blood pressure: the class list, and the pain to follow when there is some (2026-11-27). */
+  function vitalsDone() {
+    setMode('set');
+    if (followPain() && !painAsked) openDayPain();
   }
 
   function vitalsPanel() {
@@ -791,20 +887,7 @@ export function recordView({ studentId, kind, sessionId }) {
             paintVitals();
             draw();
           }, 'key'),
-          button(session.bpSys || session.hr ? '量好了' : '先跳過', () => setMode('set'), 'key primary')),
-        h('div', { class: 'field' },
-          h('div', { class: 'stepper-label' }, '今天狀況（有問題才點）'),
-          h('div', { class: 'chips chips-4' }, STATUS_FLAGS.map(([flag, label]) => (flag === 'pain'
-            ? button(painList(session.dayPain || {}).length ? `疼痛 ${painShort(session.dayPain)}` : label, () => openDayPain(draw),
-              `chip-btn${session.flags.pain ? ' is-pain' : ''}`, { 'aria-pressed': session.flags.pain ? 'true' : 'false' })
-            : button(label, () => openStatusSheet(flag, label, draw), 'chip-btn', { 'aria-pressed': session.flags[flag] ? 'true' : 'false' })))),
-          statusLine()));
-    }
-
-    /** What was picked for 睡眠、飲食、心情, under the four checks, so the details show without opening them. */
-    function statusLine() {
-      const lines = ['sleep', 'diet', 'mood'].filter((key) => session.flags[key]).map((key) => statusText(session, key)).filter((text) => text.includes('（'));
-      return lines.length > 0 && h('p', { class: 'muted small status-details' }, lines.join('　'));
+          button(session.bpSys || session.hr ? '量好了' : '先跳過', vitalsDone, 'key primary')));
     }
 
     function key(digit) {
@@ -821,7 +904,7 @@ export function recordView({ studentId, kind, sessionId }) {
             paintVitals();
             typed = '';
             if (index < fields.length - 1) index += 1;
-            else { setMode('set'); return; }
+            else { vitalsDone(); return; }
           }
           draw();
         },
@@ -919,26 +1002,59 @@ export function recordView({ studentId, kind, sessionId }) {
     });
   }
 
-  /** How the student feels on arrival: the 疼痛 check opens the body map, and the check stays on while a part is marked. */
-  function openDayPain(after) {
+  /**
+   * How the student feels on arrival, on the body map with last time's pain beneath it (2026-11-27). The 疼痛 check is on
+   * while a part hurts; parts all at 0 are written down but not flagged.
+   */
+  function openDayPain() {
+    painAsked = true;
     openPainMap('今天上課前的疼痛', {
       scores: painScores(session.dayPain),
       partNotes: session.dayPain?.painPartNotes,
       note: session.dayPain?.painNote,
       notePlaceholder: '例如：早上起床比較緊、走路才痛',
+      previous: lastPain && {
+        label: lastPain.from === 'class' ? `上次上課（${lastPain.date.slice(5).replace('-', '/')}）` : '學生資料標的疼痛',
+        lines: lastPain.from === 'class'
+          ? [Object.keys(lastPain.arrival).length && `上課前：${painText({ painMap: lastPain.arrival })}`,
+            Object.keys(lastPain.during).length && `上課中最高：${painText({ painMap: lastPain.during })}`].filter(Boolean)
+          : [painText({ painMap: lastPain.scores })],
+        scores: lastPain.scores,
+        notes: lastPain.notes,
+      },
       onScores: (map) => {
         mutate(() => {
           session.dayPain = { ...(session.dayPain || {}) };
           setPainMap(session.dayPain, map);
-          session.flags.pain = Object.keys(map).length > 0;
+          session.flags.pain = hasPain(map);
         });
         paintVitals();
-        after();
       },
       onPartNotes: (notes) => { session.dayPain = { ...(session.dayPain || {}), painPartNotes: notes }; persist(); },
       onNote: (value) => { session.dayPain = { ...(session.dayPain || {}), painNote: value }; persist(); },
-      onDone: after,
+      onDone: refresh,
     });
+  }
+
+  /** What was picked for 睡眠、飲食、心情, under the three checks, so the details show without opening them. */
+  function statusLine() {
+    const lines = ['sleep', 'diet', 'mood'].filter((key) => session.flags[key]).map((key) => statusText(session, key)).filter((text) => text.includes('（'));
+    return lines.length > 0 ? h('p', { class: 'muted small status-details' }, lines.join('　')) : '';
+  }
+
+  /** 睡眠、飲食、心情 in one small sheet from the top line (2026-11-27); each opens its details as before. */
+  function openDaySheet() {
+    openSheet('今天的睡眠、飲食、心情', (close) => {
+      const wrap = h('div', { class: 'stack' });
+      const draw = () => wrap.replaceChildren(
+        h('div', { class: 'stepper-label' }, '有狀況才點'),
+        h('div', { class: 'chips chips-3' }, STATUS_FLAGS.filter(([flag]) => flag !== 'pain').map(([flag, label]) => button(label,
+          () => openStatusSheet(flag, label, draw), 'chip-btn', { 'aria-pressed': session.flags[flag] ? 'true' : 'false' }))),
+        statusLine(),
+        button('完成', close, 'big primary'));
+      draw();
+      return wrap;
+    }, { onClose: refresh });
   }
 
   /**
@@ -1155,7 +1271,7 @@ export function recordView({ studentId, kind, sessionId }) {
         undoButton,
         finishButton)),
     banner,
-    h('div', { class: 'vitals' }, vitalsBp, vitalsHr, vitalsFlags, noteButton),
+    h('div', { class: 'vitals' }, vitalsBp, vitalsHr, vitalsPain, vitalsFlags, noteButton),
     guideText,
     h('div', { class: 'record-main' },
       h('div', { class: 'grid' },

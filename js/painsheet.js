@@ -2,7 +2,7 @@
 // Used for one exercise in class, for how the student felt on arrival, and in the student's profile.
 import { h, button, holdButton, openSheet, toast } from './dom.js';
 import { icon } from './icons.js';
-import { painList } from './core.js';
+import { painList, painText } from './core.js';
 import { bodyMap } from './bodymap.js';
 
 /** The part → score map of anything that holds pain (an exercise row, a day's check-in, a profile). */
@@ -16,10 +16,12 @@ export function painScores(target) {
  * Taking a part off needs the held button, takes its note with it, and leaves an undo.
  * Nothing waits for 完成 (2026-11-26, 疼痛輸入修改也要可以自動儲存): a line says each change is kept, and closing the
  * sheet any way at all (完成, 關閉) runs onDone, so the screen behind shows the new pain at once.
+ * `previous` ({ label, lines, scores, notes }) is the pain recorded last time (2026-11-27): it shows in a light colour under
+ * today's, with one tap to bring its parts in for new scores, or to mark them all 0 when nothing hurts today.
  */
 export function openPainSheet(title, {
   scores: initial = {}, partNotes: initialNotes = {}, note = '', notePlaceholder = '例如：下蹲到底才痛、刺痛',
-  onScores, onPartNotes, onNote, onDone,
+  previous = null, onScores, onPartNotes, onNote, onDone,
 }) {
   const scores = { ...initial };
   const notes = Object.fromEntries(Object.entries(initialNotes || {}).filter(([part, text]) => part in scores && String(text || '').trim()));
@@ -60,6 +62,38 @@ export function openPainSheet(title, {
       draw();
     };
     const map = bodyMap(tapPart);
+    const before = previous && Object.keys(previous.scores || {}).length ? previous : null;
+    const prevBox = h('div', { class: 'pain-previous' });
+    // Last time's parts with new scores to give; the first one is ready for its score.
+    const bringIn = () => {
+      const missing = Object.keys(before.scores).filter((part) => !(part in scores));
+      for (const part of missing) scores[part] = null;
+      active = missing[0] || active;
+      save();
+      draw();
+    };
+    // Nothing hurts today: last time's parts are written down as 0, so the change shows on the record.
+    const noPain = () => {
+      for (const part of Object.keys(before.scores)) scores[part] = 0;
+      active = null;
+      save();
+      draw();
+    };
+    const drawPrevious = () => {
+      if (!before) return;
+      const missing = Object.keys(before.scores).some((part) => !(part in scores));
+      const notesText = Object.entries(before.notes || {}).filter(([part, text]) => part in before.scores && String(text || '').trim())
+        .map(([part, text]) => `${part}：${String(text).trim()}`).join('；');
+      prevBox.replaceChildren(
+        h('div', { class: 'pain-previous-text' },
+          h('span', { class: 'stepper-label' }, before.label),
+          ...(before.lines || [painText({ painMap: before.scores })]).map((line) => h('strong', {}, line)),
+          notesText && h('span', { class: 'muted small' }, notesText)),
+        h('div', { class: 'pain-previous-actions' },
+          // 完成 stays the one main button (P-1); these two are the usual answers, side by side.
+          missing && button('帶入上次的部位', bringIn, ''),
+          !Object.keys(scores).length && button('今天都不痛', noPain, '')));
+    };
     const noteInput = h('textarea', { class: 'input pain-note', placeholder: '不屬於單一部位的，例如：整天都很緊', 'aria-label': '其他疼痛附註', oninput: () => { onNote(noteInput.value); saved(); } });
     noteInput.value = note || '';
     const drawChips = () => {
@@ -74,8 +108,10 @@ export function openPainSheet(title, {
         : [h('p', { class: 'muted' }, '點圖上會痛的地方，再選分數')]));
     };
     const draw = () => {
-      map.update(scores, active);
+      // Last time's pain shows only where nothing is marked today, so today's score is the one written on a part.
+      map.update(scores, active, before ? Object.fromEntries(Object.entries(before.scores).filter(([part]) => !(part in scores))) : {});
       drawChips();
+      drawPrevious();
       const partNote = active && h('textarea', {
         class: 'input pain-note', placeholder: notePlaceholder, 'aria-label': `${active} 的附註`,
         oninput: () => {
@@ -101,7 +137,10 @@ export function openPainSheet(title, {
         partNote) : '');
     };
     draw();
-    return h('div', { class: 'stack' }, status, map.el, picked, keypad,
+    return h('div', { class: 'stack' }, status, before && prevBox, map.el,
+      before && h('div', { class: 'body-legend', 'aria-hidden': 'true' },
+        h('span', {}, h('i', { class: 'is-pain' }), '上次'), h('span', {}, h('i', { class: 'is-today' }), '今天')),
+      picked, keypad,
       h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '其他附註（不分部位）'), noteInput),
       button('完成', close, 'big primary'));
   }, { onClose: () => onDone?.() });

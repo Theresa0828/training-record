@@ -1357,7 +1357,7 @@ export function planHandoutImport(file, active, getById) {
 }
 
 /** The release on screen in 設定. Must match VERSION in sw.js (a test checks). */
-export const APP_VERSION = 'v48';
+export const APP_VERSION = 'v49';
 
 // How Pilates exercises are classified, so the right one can be found in a few taps.
 export const PILATES_REGIONS = ['下肢', '核心', '脊椎', '肩臂', '全身'];
@@ -1705,6 +1705,59 @@ export function painList(row) {
 }
 
 export const DAY_PAIN = '上課前';
+
+/** Part → score of anything that holds pain, leaving out pain with no part. */
+export function painScoreMap(target) {
+  return Object.fromEntries(painList(target || {}).filter((p) => p.part).map((p) => [p.part, p.score]));
+}
+
+/** The highest score of each part over several pain records; a part marked with no score stays null until one has a score. */
+export function maxPainScores(targets) {
+  const scores = {};
+  for (const target of targets) {
+    for (const [part, score] of Object.entries(painScoreMap(target))) {
+      const prior = scores[part];
+      scores[part] = prior === undefined || prior === null ? score : (score === null ? prior : Math.max(prior, score));
+    }
+  }
+  return scores;
+}
+
+/**
+ * The pain recorded last before a class (2026-11-27, 填寫人體疼痛圖時要可以看到最近一次的疼痛記錄圖): the latest earlier
+ * class with any pain, from any teacher, on arrival (`arrival`) and the highest during its exercises (`during`); before
+ * any class has pain, the pain in the profile. `scores` is the two together, each part at its highest.
+ * { from: 'class' | 'profile', date, scores, arrival, during, notes } or null.
+ */
+export function lastPainRecord(sessions, student, current) {
+  const earlier = doneSessions(sessions, student?.id).filter((s) => s.id !== current?.id && (!current?.date || s.date <= current.date));
+  for (const s of earlier) {
+    const arrival = painScoreMap(s.dayPain);
+    const during = maxPainScores(s.rows || []);
+    if (!Object.keys(arrival).length && !Object.keys(during).length) continue;
+    return { from: 'class', date: s.date, scores: maxPainScores([{ painMap: arrival }, { painMap: during }]), arrival, during,
+      notes: { ...(s.dayPain?.painPartNotes || {}) } };
+  }
+  const scores = painScoreMap(student?.pain);
+  return Object.keys(scores).length
+    ? { from: 'profile', date: '', scores, arrival: scores, during: {}, notes: { ...(student.pain.painPartNotes || {}) } }
+    : null;
+}
+
+/** Whether that pain should be asked about again: some part hurt (a score above 0, or marked without a score). */
+export function painToFollow(record) {
+  return !!record && Object.values(record.scores).some((score) => score === null || score > 0);
+}
+
+/** Whether a class has its arrival pain written: any part marked, a 0 included (今天都不痛 marks the old parts 0). */
+export function dayPainWritten(session) {
+  return Object.keys(painScoreMap(session?.dayPain)).length > 0;
+}
+
+/** Whether a pain map holds pain worth flagging; parts all at 0 mean it is gone. */
+export function hasPain(map) {
+  return Object.values(map || {}).some((score) => score === null || score > 0);
+}
 
 /** Where a class holds pain: how the student felt on arrival, then each exercise. */
 export function painSources(session) {
@@ -2354,12 +2407,37 @@ export function summaryForDate(student, date) {
   return found ? { date: found.date, text: found.summary.trim() } : null;
 }
 
-/** A new assessment starts from the last one: every problem not yet solved comes along with its status, to be checked again. */
+/**
+ * A new assessment starts empty (2026-11-27, 動作問題要可以勾選帶入之前的內容): the last one's unsolved problems and its
+ * summary are shown beside it, and only what the teacher ticks comes along (carryProblem, see assess.js).
+ */
 export function startAssessment(student, date, id) {
-  const last = latestAssessment(student);
-  const problems = (last?.problems || []).filter((p) => p.status !== 'solved')
-    .map((p) => ({ id: p.id, text: p.text, parts: [...(p.parts || [])], status: p.status || 'open', carried: true }));
-  return { id, date, problems, summary: '', createdAt: Date.now() };
+  return { id, date, problems: [], summary: '', createdAt: Date.now() };
+}
+
+/** The assessment before this one (newest first by date, then by when it was made), or null. */
+export function previousAssessment(student, assessment) {
+  return assessmentsByDate(student).find((a) => a.id !== assessment.id
+    && ((a.date || '') < (assessment.date || '') || ((a.date || '') === (assessment.date || '') && (a.createdAt || 0) < (assessment.createdAt || 0)))) || null;
+}
+
+/** The problems from before that can be brought in: the ones not solved, in their order. */
+export function carryCandidates(previous) {
+  return (previous?.problems || []).filter((p) => p.status !== 'solved');
+}
+
+/** A problem brought in from last time keeps its id, parts and status, to be checked again. */
+export function carryProblem(problem) {
+  return { id: problem.id, text: problem.text, parts: [...(problem.parts || [])], status: problem.status || 'open', carried: true };
+}
+
+/**
+ * The problems still there, in the order to read them: 還在 first, then 改善 (2026-11-27, the card's 「還在 3」 did not
+ * say what the 3 counted).
+ */
+export function openProblems(assessment) {
+  const list = (assessment?.problems || []).filter((p) => p.status !== 'solved');
+  return [...list.filter((p) => (p.status || 'open') === 'open'), ...list.filter((p) => p.status === 'better')];
 }
 
 export function problemCounts(assessment) {

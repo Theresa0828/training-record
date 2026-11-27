@@ -287,7 +287,7 @@ textarea.input { min-height: 96px; resize: vertical; }
 .guide .icon { color: var(--primary-text); }
 .guide-text { flex: 1; font-size: 16px; line-height: 1.35; }
 .guide.is-new .guide-text { animation: guide-in .24s var(--ease); }
-.vitals { display: grid; grid-template-columns: 1.2fr .8fr 1.15fr .85fr; gap: 8px; padding: 8px 12px; }
+.vitals { display: grid; grid-template-columns: 1.1fr .75fr 1.15fr 1fr .95fr; gap: 8px; padding: 8px 12px; }
 .vital {
   display: flex; align-items: center; gap: 6px; min-height: 48px; padding: 8px 12px; background: var(--surface); border: 0; border-radius: 16px; box-shadow: var(--card-shadow); overflow: hidden;
   color: inherit; font: inherit; text-align: left; cursor: pointer; touch-action: pan-x pan-y; min-width: 0; transition: transform .12s var(--ease);
@@ -301,6 +301,11 @@ textarea.input { min-height: 96px; resize: vertical; }
 .vital-value { font-size: 16px; font-variant-numeric: tabular-nums; line-height: 1.25; }
 .vital .vital-label { flex: none; }
 .vital .vital-value { font-size: 13px; line-height: 1.5; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Five buttons in the top line (2026-11-27): below a wide iPad the name sits above the value, so the value is not cut. */
+@media (max-width: 999px) {
+  .vital { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; padding-inline: 10px; }
+  .vital .vital-value { max-width: 100%; }
+}
 .is-vitals .grid-body { max-height: 140px; }
 .record-main { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 0 12px calc(12px + env(safe-area-inset-bottom, 0px)); }
 
@@ -460,6 +465,7 @@ textarea.input { min-height: 96px; resize: vertical; }
 .chips-10 { display: grid; grid-template-columns: repeat(10, 1fr); }
 .chips-10 .btn { padding-inline: 0; min-width: 0; }
 .chips-4 { display: grid; grid-template-columns: repeat(4, 1fr); }
+.chips-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .chip-btn { min-height: 48px; padding: 6px 12px; font-size: 16px; }
 .chips-4 .chip-btn, .chips-5 .chip-btn, .chips-6 .chip-btn { min-width: 0; }
 .vital-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -479,7 +485,10 @@ textarea.input { min-height: 96px; resize: vertical; }
 .sheet-overlay.closing .sheet { animation: sheet-out .16s ease-in forwards; }
 .sheet-wide { max-width: 744px; height: 88%; }
 .sheet-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 8px 8px 18px; }
-.sheet-body { padding: 8px 16px 20px; overflow-y: auto; overscroll-behavior: contain; }
+/* Never sideways (2026-11-27, 動作問題評估會左右滑動 on the iPad): a sheet only scrolls up and down. */
+.sheet-body { padding: 8px 16px 20px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+input[type="date"].input { display: block; min-width: 0; max-width: 100%; -webkit-appearance: none; appearance: none; }
+input[type="date"].input::-webkit-date-and-time-value { text-align: left; }
 .picker-results { display: grid; gap: 16px; }
 .pick-block { display: grid; gap: 8px; }
 .pick-head { min-height: 52px; }
@@ -508,6 +517,13 @@ textarea.input { min-height: 96px; resize: vertical; }
 .body-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .body-legend i { width: 14px; height: 14px; border-radius: 4px; background: var(--fg); }
 .body-legend i.is-pain { background: var(--alert-soft); box-shadow: inset 0 0 0 1.5px var(--alert); }
+.body-legend i.is-today { background: var(--alert); }
+/* Last time's pain above the body map when today's is written (2026-11-27). */
+.pain-previous { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 10px 14px; border-radius: 16px; background: var(--alert-soft); color: var(--on-alert-soft); }
+.pain-previous .stepper-label, .pain-previous .muted { color: inherit; }
+.pain-previous-text { display: grid; gap: 2px; min-width: 0; flex: 1 1 200px; }
+.pain-previous-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pain-previous:not(:has(.btn)) .pain-previous-actions { display: none; }
 .body-picked { display: flex; flex-wrap: wrap; gap: 6px; min-height: 48px; align-items: center; }
 .body-picked .chip-btn { display: inline-flex; align-items: center; gap: 6px; }
 .body-picked .chip-btn .icon { width: 18px; height: 18px; }
@@ -641,7 +657,10 @@ h1 small, .stepper-value small { font-weight: 400; }
   .grid-name { padding-inline: 6px; }
   .grid-name-text { font-size: 13px; overflow-wrap: break-word; }
   .cell span + span { border-left: 0; border-top: 1px solid var(--line); height: auto; width: 70%; }
-  .vitals { padding-inline: 8px; gap: 4px; grid-template-columns: 1.25fr .85fr 1fr .9fr; }
+  /* Five buttons do not fit one phone line: three, then two. */
+  .vitals { padding-inline: 8px; gap: 4px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .vitals .vital { grid-column: span 2; }
+  .vitals .vital:nth-child(n+4) { grid-column: span 3; }
   .vital { flex-direction: column; gap: 0; padding: 3px 8px; }
   .chips-11 { grid-template-columns: repeat(6, 1fr); }
   .chips-10 { grid-template-columns: repeat(5, 1fr); }
@@ -966,6 +985,7 @@ textarea.input.class-goal-input { min-height: 64px; font-size: 20px; line-height
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .vital.is-next, .grid-add.is-next { position: relative; overflow: visible; box-shadow: 0 0 0 2px var(--next), var(--card-shadow); }
 .grid-add.is-next { box-shadow: 0 0 0 2px var(--next); }
+.vital.is-due { box-shadow: 0 0 0 2px var(--alert), var(--card-shadow); }
 .vital.is-next::after, .grid-add.is-next::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: 0 0 0 0 var(--next); animation: beat 1.6s ease-out infinite; pointer-events: none; }
 .grid-row.is-current { background: color-mix(in srgb, var(--next-soft) 55%, transparent); border-radius: 16px; }
 .grid-row { transition: background-color .2s var(--ease); }
@@ -1305,8 +1325,22 @@ video.photo-img { object-fit: contain; background: #020300; }
 .problem-status.is-better { box-shadow: inset 0 0 0 1.5px var(--done-strong); color: var(--done-strong); background: transparent; }
 .problem-status.is-solved { background: var(--done); color: var(--on-done); }
 .profile-link { display: grid; gap: 4px; padding: 10px 12px; border-radius: 14px; background: var(--soft); }
-.problem-card-list { display: grid; gap: 2px; min-width: 0; }
-.problem-card-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.problem-card-list { display: grid; gap: 4px; min-width: 0; }
+/* Each problem with its status in front, so 還在 and 改善 read at a glance (2026-11-27). */
+.problem-card-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.problem-card-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.problem-status.is-open { background: var(--fg); color: var(--surface); }
+/* Ticking what comes along from the last assessment (2026-11-27). */
+.tick-btn { flex: none; display: grid; place-items: center; width: 48px; height: 48px; margin: -4px 0 -4px -8px; padding: 0; border: 0; background: transparent; cursor: pointer; touch-action: pan-x pan-y; }
+.tick-box { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; box-shadow: inset 0 0 0 2px var(--line-strong); background: var(--surface); color: var(--on-primary); }
+.tick-btn.is-on .tick-box { background: var(--primary); box-shadow: none; }
+.tick-box .icon { width: 20px; height: 20px; }
+.problem-row.is-off .problem-main strong { color: var(--muted); font-weight: 500; }
+.problem-main strong { overflow-wrap: anywhere; }
+.carry-head { min-height: 48px; align-items: center; }
+.carry-summary { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border-radius: 14px; background: var(--surface); }
+.carry-summary.is-off .carry-summary-text > span:last-child { color: var(--muted); }
+.carry-summary-text { display: grid; gap: 2px; min-width: 0; padding-top: 6px; overflow-wrap: anywhere; }
 .problem-map { display: grid; gap: 6px; justify-items: center; }
 .problem-map .body-map { width: min(100%, 360px); }
 
@@ -1369,6 +1403,7 @@ video.photo-img { object-fit: contain; background: #020300; }
   .pf-body { grid-template-columns: minmax(0, 1fr); }
   .pf-figure { max-width: 260px; }
 }
+.summary-goal .sg-carry { grid-column: 1 / -1; }
 .summary-goal .sg-life { grid-column: 1 / -1; display: grid; gap: 2px; margin: 0; }
 .pf-figure .pain-pick { display: flex; justify-content: center; align-items: center; gap: 8px; }
 

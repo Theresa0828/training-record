@@ -33,6 +33,8 @@ export function sessionFacts(session) {
   ].filter(Boolean).join('・');
   const flags = Object.entries(FLAG_NAMES).filter(([key]) => session.flags?.[key])
     .map(([key, name]) => (key === 'pain' ? (session.dayPain && painText(session.dayPain) ? `疼痛（${painText(session.dayPain)}）` : name) : statusText(session, key)));
+  // Followed pain that is gone today (all 0, 2026-11-27) is not flagged, but the record still says so.
+  if (!session.flags?.pain && session.dayPain && painText(session.dayPain)) flags.unshift(`上課前不痛（${painText(session.dayPain)}）`);
   return [
     String(session.classGoal || '').trim() && h('p', {}, `本堂小目標：${session.classGoal.trim()}`),
     vitals && h('p', { class: 'muted' }, vitals),

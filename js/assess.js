@@ -8,13 +8,19 @@ import { bodyMap } from './bodymap.js';
 import { painScores } from './painsheet.js';
 import {
   PROBLEM_STATUS, DEFAULT_PROBLEMS, assessmentsByDate, latestAssessment, startAssessment, problemCountText, problemText,
-  withAssessment, chooserOptions, dateKey, doneSessions, painSeries, newId,
+  withAssessment, chooserOptions, dateKey, doneSessions, painSeries, newId, previousAssessment, carryCandidates, carryProblem,
 } from './core.js';
 
 const STATUS_LABEL = Object.fromEntries(PROBLEM_STATUS);
 
 function shortDate(key) {
   return (key || '').slice(5).replace('-', '/');
+}
+
+/** A tick box big enough for a finger: on means it is brought in (2026-11-27). */
+function tickBox(on, label, onTap) {
+  return h('button', { type: 'button', class: `tick-btn${on ? ' is-on' : ''}`, role: 'checkbox', 'aria-checked': on ? 'true' : 'false', 'aria-label': label, onclick: onTap },
+    h('span', { class: 'tick-box' }, on ? icon('check') : ''));
 }
 
 /** The pain to draw under the problems: the latest class scores, or the profile when there are none. */
@@ -117,9 +123,28 @@ export function editAssessment(student, assessmentId = null, onDone = null) {
 
     const list = h('div', { class: 'stack-sm problem-list' });
     const quick = h('div', { class: 'row-wrap' });
+    // Last time's unsolved problems and summary are shown, and only what is ticked comes along (2026-11-27).
+    const before = previousAssessment(current(), a);
+    const candidates = carryCandidates(before);
+    const fromBefore = new Set(candidates.map((p) => p.id));
+    const entry = (problem) => a.problems.find((p) => p.id === problem.id);
+    const bring = (problems) => {
+      for (const problem of problems) if (!entry(problem)) a.problems.push(carryProblem(problem));
+      persist();
+      drawList();
+    };
+    const leaveOut = (problem) => {
+      const index = a.problems.findIndex((p) => p.id === problem.id);
+      const was = a.problems[index];
+      a.problems.splice(index, 1);
+      persist();
+      drawList();
+      toast(`${problem.text} 不帶入了`, { label: '復原', run: () => { a.problems.splice(index, 0, was); persist(); drawList(); } });
+    };
 
     const drawQuick = () => {
-      const used = new Set(a.problems.map((p) => p.text));
+      // Last time's problems are ticked above, never added again as new ones.
+      const used = new Set([...a.problems, ...candidates].map((p) => p.text));
       // replaceChildren is the DOM's own: a false here would show as the word "false" (2026-11-24).
       quick.replaceChildren(...chooserOptions(DEFAULT_PROBLEMS, addedProblems()).filter((name) => !used.has(name))
         .map((name) => button(`＋ ${name}`, () => addProblem(name), 'chip-btn chip-add')),
@@ -134,28 +159,55 @@ export function editAssessment(student, assessmentId = null, onDone = null) {
       toast(`已移除 ${problem.text}`, { label: '復原', run: () => { a.problems.splice(index, 0, problem); persist(); drawList(); } });
     };
 
+    // The parts and the three statuses of a problem in this assessment.
+    const controls = (problem) => [
+      button(problem.parts?.length ? [icon('people'), h('span', {}, problem.parts.join('、'))] : [icon('people'), h('span', {}, '標部位')],
+        () => partsSheet(problem, pain, () => { persist(); drawList(); }), `problem-parts${problem.parts?.length ? ' is-marked' : ''}`),
+      h('span', { class: 'chip-seg', role: 'group', 'aria-label': `${problem.text}的狀態` },
+        PROBLEM_STATUS.map(([value, label]) => button(label, () => {
+          problem.status = value;
+          persist();
+          drawList();
+        }, 'chip-btn seg-btn', { 'aria-pressed': (problem.status || 'open') === value ? 'true' : 'false' }))),
+    ];
+
     const drawList = () => {
-      list.replaceChildren(...(a.problems.length
-        ? a.problems.map((problem) => h('div', { class: 'problem-row' },
-          h('div', { class: 'problem-main' },
-            h('strong', {}, problem.text),
-            problem.carried && h('span', { class: 'muted small' }, '上次的問題')),
-          button(problem.parts?.length ? [icon('people'), h('span', {}, problem.parts.join('、'))] : [icon('people'), h('span', {}, '標部位')],
-            () => partsSheet(problem, pain, () => { persist(); drawList(); }), `problem-parts${problem.parts?.length ? ' is-marked' : ''}`),
-          h('span', { class: 'chip-seg', role: 'group', 'aria-label': `${problem.text}的狀態` },
-            PROBLEM_STATUS.map(([value, label]) => button(label, () => {
-              problem.status = value;
-              persist();
-              drawList();
-            }, 'chip-btn seg-btn', { 'aria-pressed': (problem.status || 'open') === value ? 'true' : 'false' }))),
-          holdButton('移除', () => removeProblem(problem), 'ghost danger-text')))
-        : [h('p', { class: 'muted' }, '還沒有問題。點下面常用的，或自己寫一個。')]));
+      const lastTime = (problem) => [problem.parts?.length && problem.parts.join('、'), `上次${STATUS_LABEL[problem.status || 'open']}`].filter(Boolean).join('・');
+      // Last time's problems first, ticked or not, then the ones new this time.
+      const carriedRows = candidates.map((problem) => {
+        const mine = entry(problem);
+        return mine
+          ? h('div', { class: 'problem-row' },
+            tickBox(true, `帶入 ${problem.text}`, () => leaveOut(problem)),
+            h('div', { class: 'problem-main' }, h('strong', {}, mine.text), h('span', { class: 'muted small' }, lastTime(problem))),
+            ...controls(mine))
+          : h('div', { class: 'problem-row is-off' },
+            tickBox(false, `帶入 ${problem.text}`, () => bring([problem])),
+            h('div', { class: 'problem-main' }, h('strong', {}, problem.text), h('span', { class: 'muted small' }, lastTime(problem))));
+      });
+      const newRows = a.problems.filter((problem) => !fromBefore.has(problem.id)).map((problem) => h('div', { class: 'problem-row' },
+        h('div', { class: 'problem-main' },
+          h('strong', {}, problem.text),
+          problem.carried && h('span', { class: 'muted small' }, '上次的問題')),
+        ...controls(problem),
+        holdButton('移除', () => removeProblem(problem), 'ghost danger-text')));
+      const missing = candidates.filter((problem) => !entry(problem));
+      list.replaceChildren(
+        ...(candidates.length ? [h('div', { class: 'row-between carry-head' },
+          h('span', { class: 'muted' }, `${shortDate(before.date)} 評估還沒解決的，勾選要帶入的`),
+          missing.length > 0 ? button('全部帶入', () => bring(missing), '') : '')] : []),
+        ...carriedRows,
+        ...(candidates.length && newRows.length ? [h('div', { class: 'muted carry-head' }, '這次新增的')] : []),
+        ...newRows,
+        ...(!candidates.length && !newRows.length ? [h('p', { class: 'muted' }, '還沒有問題。點下面常用的，或自己寫一個。')] : []));
       drawQuick();
     };
 
     const addProblem = (text) => {
       const name = text.trim();
       if (!name) { toast('先寫問題內容'); return; }
+      const fromLast = candidates.find((p) => p.text === name);
+      if (fromLast) { bring([fromLast]); return; }
       if (a.problems.some((p) => p.text === name)) { toast(`${name} 已經在清單裡`); return; }
       a.problems.push({ id: newId('pb'), text: name, parts: [], status: 'open' });
       if (!DEFAULT_PROBLEMS.includes(name) && !addedProblems().includes(name)) store.save('options', { id: newId('opt'), type: 'problem', name });
@@ -169,7 +221,26 @@ export function editAssessment(student, assessmentId = null, onDone = null) {
     // The summary is written right beside the goal, so each main problem can be matched to where the training goes.
     const summary = h('textarea', { class: 'input', placeholder: '用學生聽得懂的話，說明主要問題和接下來怎麼練', 'aria-label': '問題總結' });
     summary.value = a.summary || '';
-    summary.addEventListener('input', () => { a.summary = summary.value; persist(); });
+    // Last time's summary, shown in full with a tick to bring it in, so it can be read before deciding (2026-11-27).
+    const beforeSummary = before?.summary?.trim() || '';
+    const summaryCarry = h('div', { class: 'sg-carry' });
+    const drawSummaryCarry = () => {
+      if (!beforeSummary) return;
+      const on = (a.summary || '').includes(beforeSummary);
+      summaryCarry.replaceChildren(h('div', { class: `carry-summary${on ? '' : ' is-off'}` },
+        tickBox(on, '帶入上次的問題總結', () => {
+          const text = (a.summary || '').trim();
+          a.summary = on ? text.replace(beforeSummary, '').trim() : (text ? `${text}\n${beforeSummary}` : beforeSummary);
+          summary.value = a.summary;
+          persist();
+          drawSummaryCarry();
+        }),
+        h('div', { class: 'carry-summary-text' },
+          h('span', { class: 'muted small' }, `${shortDate(before.date)} 的問題總結`),
+          h('span', {}, beforeSummary))));
+    };
+    drawSummaryCarry();
+    summary.addEventListener('input', () => { a.summary = summary.value; persist(); drawSummaryCarry(); });
     const goal = h('textarea', { class: 'input', placeholder: '還沒寫訓練目標', 'aria-label': '訓練目標' });
     goal.value = current().goal || '';
     goal.addEventListener('input', () => {
@@ -187,6 +258,8 @@ export function editAssessment(student, assessmentId = null, onDone = null) {
       h('div', { class: 'summary-goal' },
         // The student's daily needs from the profile, so the summary and goal answer them (2026-11-24).
         lifeNeeds(current()) && h('p', { class: 'sg-life' }, h('span', { class: 'muted small' }, '日常需求'), h('span', {}, lifeNeeds(current()))),
+        // Last time's summary across the top, so the summary and goal boxes stay side by side and level.
+        beforeSummary && summaryCarry,
         h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '問題總結（給學生看）'), summary),
         h('div', { class: 'field' }, h('div', { class: 'stepper-label' }, '訓練目標（和總結對得上嗎？）'), goal)),
       saved && holdButton('刪除這次評估', () => {
